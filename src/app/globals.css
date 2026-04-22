@@ -4,11 +4,30 @@
 
 @layer base {
   :root {
-    --background: #0f172a;
-    --foreground: #f1f5f9;
+    --background: #020617;
+    --surface: #0b1220;
+    --surface-2: #131f35;
+    --foreground: #e2e8f0;
+    --muted: #94a3b8;
+    --accent: #22d3ee;
   }
 
   body {
     @apply bg-slate-950 text-slate-100 antialiased;
+    font-family: var(--font-body), sans-serif;
+    background-image:
+      radial-gradient(circle at 12% 5%, rgba(34, 211, 238, 0.09), transparent 34%),
+      radial-gradient(circle at 92% 95%, rgba(16, 185, 129, 0.1), transparent 30%),
+      linear-gradient(180deg, rgba(10, 17, 30, 0.7), rgba(2, 6, 23, 0.95));
+  }
+
+  h1,
+  h2,
+  h3,
+  h4,
+  h5,
+  h6 {
+    font-family: var(--font-heading), sans-serif;
+    letter-spacing: -0.015em;
   }
 }

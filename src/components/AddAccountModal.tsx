@@ -1,5 +1,4 @@
 "use client";
-
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 
@@ -136,7 +135,7 @@ export default function AddAccountModal({ onClose }: { onClose: () => void }) {
                 onChange={(e) => setForm({ ...form, currency: e.target.value })}
                 className="w-full rounded-lg border border-slate-700 bg-slate-800 px-3 py-2.5 text-sm text-white outline-none transition focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500/40"
               >
-                {["NZD", "AUD", "USD", "EUR", "GBP"].map((c) => (
+                {["NZD", "AUD", "USD", "EUR", "GBP", "RUB"].map((c) => (
                   <option key={c}>{c}</option>
                 ))}
               </select>

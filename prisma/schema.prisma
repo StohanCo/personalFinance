@@ -82,6 +82,7 @@ model User {
   transactions Transaction[]
   categories   Category[]
   budgets      Budget[]
+  accountSnapshots AccountSnapshot[]
   receipts     Receipt[]
   gstPeriods   GSTPeriod[]
   taxYears     TaxYear[]
@@ -110,8 +111,32 @@ model Account {
 
   transactions  Transaction[] @relation("AccountTxs")
   transfersFrom Transaction[] @relation("TransferFromAccount")
+  snapshots     AccountSnapshot[]
 
   @@index([userId, isArchived])
+}
+
+model AccountSnapshot {
+  id           String   @id
+  userId       String
+  user         User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  accountId    String
+  account      Account  @relation(fields: [accountId], references: [id], onDelete: Cascade)
+  snapshotDate DateTime @db.Date
+  capturedAt   DateTime @default(now())
+
+  name       String
+  type       AccountType
+  currency   String
+  balance    Decimal @db.Decimal(18, 2)
+  creditLimit Decimal? @db.Decimal(18, 2)
+  apr        Decimal? @db.Decimal(6, 3)
+  color      String
+  notes      String?
+  isArchived Boolean
+
+  @@unique([accountId, snapshotDate])
+  @@index([userId, snapshotDate])
 }
 
 // Categories can be system (userId = null) or user-defined.

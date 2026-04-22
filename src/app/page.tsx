@@ -4,6 +4,7 @@ import { redirect } from "next/navigation";
 import { Decimal } from "decimal.js";
 import SignOutButton from "@/components/SignOutButton";
 import Dashboard from "@/components/Dashboard";
+import { convertToNzd, fetchNzdFxRates, roundMoney } from "@/lib/fx/exchange";
 
 export default async function DashboardPage() {
   const session = await auth();
@@ -32,6 +33,27 @@ export default async function DashboardPage() {
     (sum, a) => sum.plus(a.balance),
     new Decimal(0),
   );
+
+  const distinctCurrencies = [...new Set(accounts.map((a) => a.currency))];
+  let totalBalanceNzd: string | null = null;
+  let fxCheckedAt: string | null = null;
+  let fxProvider: string | null = null;
+
+  try {
+    const fx = await fetchNzdFxRates();
+    fxCheckedAt = fx.updatedAt;
+    fxProvider = fx.provider;
+
+    const converted = accounts.reduce((sum, a) => {
+      const nzdAmount = convertToNzd(Number(a.balance.toString()), a.currency, fx.rates);
+      return sum + nzdAmount;
+    }, 0);
+
+    totalBalanceNzd = roundMoney(converted).toFixed(2);
+  } catch {
+    // Keep dashboard available if FX provider is unavailable.
+    totalBalanceNzd = null;
+  }
 
   const now = new Date();
   const monthStart = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1));
@@ -90,8 +112,12 @@ export default async function DashboardPage() {
         }))}
         summary={{
           totalBalance: totalBalance.toFixed(2),
+          totalBalanceNzd,
           monthIncome: monthIncome.toFixed(2),
           monthExpenses: monthExpenses.toFixed(2),
+          fxCheckedAt,
+          fxProvider,
+          currencies: distinctCurrencies,
         }}
       />
     </div>
