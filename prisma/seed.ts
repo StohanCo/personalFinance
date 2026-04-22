@@ -15,21 +15,28 @@ async function main() {
   console.log("🌱 Seeding database…");
 
   // 1. System categories (userId = null)
+  // Prisma can't upsert on nullable unique fields, so use findFirst + create/update
   for (const cat of SYSTEM_CATEGORIES) {
-    await prisma.category.upsert({
-      where: { userId_key: { userId: null as never, key: cat.key } },
-      create: { ...cat, userId: null },
-      update: {
-        nameEn: cat.nameEn,
-        nameRu: cat.nameRu,
-        defaultDeductible: cat.defaultDeductible,
-        defaultDeductiblePercent: cat.defaultDeductiblePercent,
-        defaultGstApplicable: cat.defaultGstApplicable,
-        color: cat.color,
-        icon: cat.icon,
-        sortOrder: cat.sortOrder,
-      },
+    const existing = await prisma.category.findFirst({
+      where: { userId: null, key: cat.key },
     });
+    if (existing) {
+      await prisma.category.update({
+        where: { id: existing.id },
+        data: {
+          nameEn: cat.nameEn,
+          nameRu: cat.nameRu,
+          defaultDeductible: cat.defaultDeductible,
+          defaultDeductiblePercent: cat.defaultDeductiblePercent,
+          defaultGstApplicable: cat.defaultGstApplicable,
+          color: cat.color,
+          icon: cat.icon,
+          sortOrder: cat.sortOrder,
+        },
+      });
+    } else {
+      await prisma.category.create({ data: { ...cat, userId: null } });
+    }
   }
   console.log(`✓ ${SYSTEM_CATEGORIES.length} system categories`);
 
