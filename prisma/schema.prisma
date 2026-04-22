@@ -1,0 +1,323 @@
+// FinOps Tracker — Database Schema
+// Postgres on Neon. Decimal(18,2) for money. Never use Float for currency.
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider  = "postgresql"
+  url       = env("DATABASE_URL")     // pooled connection (PgBouncer)
+  directUrl = env("DIRECT_URL")        // unpooled, used by migrations on Neon
+}
+
+// ---------- Enums ----------
+
+enum AccountType {
+  CHECKING
+  SAVINGS
+  CREDIT
+  LOAN
+  INVESTMENT // reserved for Phase 2
+}
+
+enum TxType {
+  INCOME
+  EXPENSE
+  TRANSFER
+}
+
+enum TxStatus {
+  PENDING   // scanned or imported, needs user review
+  VERIFIED  // user confirmed, counts for tax/GST
+  REJECTED  // explicitly excluded from reports
+}
+
+enum TxSource {
+  MANUAL
+  SCAN
+  IMPORT
+  RULE
+  API
+}
+
+enum BudgetPeriod {
+  MONTHLY
+  QUARTERLY
+  YEARLY
+}
+
+enum ScanStatus {
+  PENDING
+  PROCESSING
+  COMPLETED
+  FAILED
+}
+
+enum PeriodStatus {
+  OPEN
+  LOCKED
+  FILED
+}
+
+// ---------- Core models ----------
+
+model User {
+  id            String   @id @default(cuid())
+  email         String   @unique
+  name          String?
+  image         String?
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  // Settings
+  currency      String   @default("NZD")
+  language      String   @default("en")
+  gstRegistered Boolean  @default(false)
+  gstNumber     String?
+  taxYearStart  String   @default("04-01") // NZ default: April 1
+  hideBalances  Boolean  @default(false)
+
+  accounts     Account[]
+  transactions Transaction[]
+  categories   Category[]
+  budgets      Budget[]
+  receipts     Receipt[]
+  gstPeriods   GSTPeriod[]
+  taxYears     TaxYear[]
+  auditLogs    AuditLog[]
+
+  @@index([email])
+}
+
+model Account {
+  id          String      @id @default(cuid())
+  userId      String
+  user        User        @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  name        String
+  type        AccountType
+  currency    String      @default("NZD")
+  balance     Decimal     @default(0) @db.Decimal(18, 2)
+  creditLimit Decimal?    @db.Decimal(18, 2)
+  apr         Decimal?    @db.Decimal(6, 3) // annual percentage rate
+  color       String      @default("#10b981")
+  notes       String?
+  isArchived  Boolean     @default(false)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  transactions  Transaction[] @relation("AccountTxs")
+  transfersFrom Transaction[] @relation("TransferFromAccount")
+
+  @@index([userId, isArchived])
+}
+
+// Categories can be system (userId = null) or user-defined.
+// Users see system + their own. System categories seed deduction defaults.
+model Category {
+  id     String  @id @default(cuid())
+  userId String?
+  user   User?   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  key    String // stable slug, e.g. "home-office", used for i18n + rules
+  nameEn String
+  nameRu String
+  type   TxType  // INCOME or EXPENSE (TRANSFER has no category)
+
+  // Defaults applied when creating a transaction; overridable per-tx
+  defaultDeductible        Boolean @default(false)
+  defaultDeductiblePercent Int     @default(0) // 0–100
+  defaultGstApplicable     Boolean @default(true)
+
+  color      String  @default("#64748b")
+  icon       String  @default("MoreHorizontal")
+  sortOrder  Int     @default(100)
+  isArchived Boolean @default(false)
+
+  createdAt DateTime @default(now())
+
+  transactions Transaction[]
+  budgets      Budget[]
+
+  @@unique([userId, key])
+  @@index([userId, type])
+}
+
+model Transaction {
+  id     String @id @default(cuid())
+  userId String
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  accountId String
+  account   Account @relation("AccountTxs", fields: [accountId], references: [id], onDelete: Restrict)
+
+  // Transfers: source = accountId (outflow), destination = transferAccountId (inflow)
+  transferAccountId String?
+  transferAccount   Account? @relation("TransferFromAccount", fields: [transferAccountId], references: [id], onDelete: Restrict)
+
+  categoryId String?
+  category   Category? @relation(fields: [categoryId], references: [id], onDelete: SetNull)
+
+  type     TxType
+  amount   Decimal  @db.Decimal(18, 2)
+  currency String   @default("NZD")
+  date     DateTime @db.Date
+
+  vendor      String?
+  description String?
+  notes       String?
+
+  // GST (NZ) — tracked per line, not just at period rollup
+  gstApplicable Boolean @default(false)
+  gstAmount     Decimal @default(0) @db.Decimal(18, 2)
+  gstInclusive  Boolean @default(true)
+
+  // Deductibility (for NZ IR3 filing)
+  isDeductible      Boolean @default(false)
+  deductiblePercent Int     @default(0) // 0–100
+
+  // Verification workflow — tx doesn't hit tax/GST reports until VERIFIED
+  status     TxStatus  @default(VERIFIED)
+  verifiedAt DateTime?
+
+  // Receipt linkage (1:1)
+  receiptId String?  @unique
+  receipt   Receipt? @relation(fields: [receiptId], references: [id], onDelete: SetNull)
+
+  // Provenance
+  source     TxSource @default(MANUAL)
+  externalId String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([userId, date])
+  @@index([userId, status])
+  @@index([userId, type, date])
+  @@index([accountId, date])
+  @@index([categoryId])
+}
+
+model Receipt {
+  id     String @id @default(cuid())
+  userId String
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  // Vercel Blob (or any S3-compatible)
+  storageKey String
+  storageUrl String
+  mimeType   String
+  fileSize   Int
+
+  // AI scan status
+  scanStatus ScanStatus @default(PENDING)
+  scanError  String?
+  scannedAt  DateTime?
+
+  // Extracted data (raw Claude response preserved in `extractedData`)
+  extractedData Json? // full JSON from the scanner
+  confidence    String? // "high" | "medium" | "low"
+  vendor        String?
+  receiptDate   DateTime? @db.Date
+  total         Decimal?  @db.Decimal(18, 2)
+  currency      String?
+  extractedGst  Decimal?  @db.Decimal(18, 2)
+
+  createdAt DateTime @default(now())
+
+  transaction Transaction?
+
+  @@index([userId, createdAt])
+  @@index([scanStatus])
+}
+
+model Budget {
+  id     String @id @default(cuid())
+  userId String
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  categoryId String
+  category   Category @relation(fields: [categoryId], references: [id], onDelete: Cascade)
+
+  amount    Decimal      @db.Decimal(18, 2)
+  period    BudgetPeriod @default(MONTHLY)
+  startDate DateTime     @default(now()) @db.Date
+  endDate   DateTime?    @db.Date
+
+  rollover Boolean @default(false)
+  alertAt  Int? // alert when spent ≥ X % (e.g. 80)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([userId, categoryId, period])
+  @@index([userId])
+}
+
+// GST return for an IRD period. Recomputed from verified transactions.
+model GSTPeriod {
+  id     String @id @default(cuid())
+  userId String
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  periodStart DateTime @db.Date
+  periodEnd   DateTime @db.Date
+
+  outputGst Decimal @default(0) @db.Decimal(18, 2) // collected on sales
+  inputGst  Decimal @default(0) @db.Decimal(18, 2) // claimed on expenses
+  netGst    Decimal @default(0) @db.Decimal(18, 2) // positive = payable to IRD
+
+  status       PeriodStatus @default(OPEN)
+  filedAt      DateTime?
+  irdReference String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([userId, periodStart])
+  @@index([userId])
+}
+
+// Income tax year. NZ default is 1 April – 31 March.
+model TaxYear {
+  id     String @id @default(cuid())
+  userId String
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  yearStart DateTime @db.Date
+  yearEnd   DateTime @db.Date
+
+  totalIncome     Decimal @default(0) @db.Decimal(18, 2)
+  totalDeductions Decimal @default(0) @db.Decimal(18, 2)
+  taxableIncome   Decimal @default(0) @db.Decimal(18, 2)
+
+  status       PeriodStatus @default(OPEN)
+  filedAt      DateTime?
+  irdReference String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([userId, yearStart])
+  @@index([userId])
+}
+
+// Append-only audit trail for everything that matters for tax
+model AuditLog {
+  id     String  @id @default(cuid())
+  userId String?
+  user   User?   @relation(fields: [userId], references: [id], onDelete: SetNull)
+
+  entityType String // "transaction" | "account" | "budget" | ...
+  entityId   String
+  action     String // "created" | "updated" | "verified" | "deleted" | "filed"
+  changes    Json?  // diff of changed fields
+  metadata   Json?  // ip, userAgent, actor context
+
+  createdAt DateTime @default(now())
+
+  @@index([entityType, entityId])
+  @@index([userId, createdAt])
+}

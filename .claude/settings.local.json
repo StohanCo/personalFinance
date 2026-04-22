@@ -1,0 +1,15 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(find \"C:\\\\Users\\\\stohan\\\\Downloads\\\\files\\\\finops-tracker/{prisma,src//\" -type f)",
+      "Bash(docker --version)",
+      "Bash(vercel --version)",
+      "Bash(gh --version)",
+      "Bash(git --version)",
+      "Bash(npm install *)",
+      "Bash(npm run *)",
+      "Bash(git init *)",
+      "Bash(git add *)"
+    ]
+  }
+}
