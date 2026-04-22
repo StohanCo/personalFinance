@@ -9,7 +9,24 @@
       "Bash(npm install *)",
       "Bash(npm run *)",
       "Bash(git init *)",
-      "Bash(git add *)"
+      "Bash(git add *)",
+      "Bash(grep \"\\\\.env$\")",
+      "Bash(git commit -m ' *)",
+      "Bash(node -e \"console.log\\(require\\('crypto'\\).randomBytes\\(32\\).toString\\('base64'\\)\\)\")",
+      "Bash(git remote *)",
+      "Bash(git push *)",
+      "Bash(npx prisma *)",
+      "Bash(git commit *)",
+      "Bash(vercel link *)",
+      "Bash(vercel env *)",
+      "Bash(vercel --prod)",
+      "Bash(vercel ls *)",
+      "Bash(vercel inspect *)",
+      "Bash(vercel domains *)",
+      "Bash(vercel alias *)",
+      "Bash(vercel project *)",
+      "Bash(vercel logs *)",
+      "WebFetch(domain:raw.githubusercontent.com)"
     ]
   }
 }
