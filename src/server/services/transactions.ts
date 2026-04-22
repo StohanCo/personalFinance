@@ -3,6 +3,9 @@ import type { Prisma, TxType, TxStatus, TxSource } from "@prisma/client";
 import { prisma } from "@/lib/db/client";
 import { gstFromInclusive } from "@/lib/tax/gst";
 
+// Re-export enums so route files have one import for everything service-related
+export type { TxType, TxStatus };
+
 /**
  * Business logic for transactions.
  *
@@ -141,6 +144,166 @@ export async function deleteTransaction(txId: string, userId: string) {
         changes: { snapshot: t as unknown as Prisma.JsonValue },
       },
     });
+  });
+}
+
+// ---------- update ----------
+
+export type UpdateTxInput = {
+  userId: string;
+  /** All editable fields below are optional — only provided keys are mutated */
+  type?: TxType;
+  amount?: Decimal.Value;
+  date?: Date;
+  vendor?: string | null;
+  description?: string | null;
+  notes?: string | null;
+  categoryId?: string | null;
+  accountId?: string;
+  gstApplicable?: boolean;
+  gstAmount?: Decimal.Value;
+  gstInclusive?: boolean;
+  isDeductible?: boolean;
+  deductiblePercent?: number;
+  status?: TxStatus;
+};
+
+export async function updateTransaction(txId: string, input: UpdateTxInput) {
+  return prisma.$transaction(async (tx) => {
+    // ── 1. Fetch current record ──────────────────────────────────────────────
+    const old = await tx.transaction.findFirst({
+      where: { id: txId, userId: input.userId },
+    });
+    if (!old) throw new Error("Transaction not found");
+
+    // ── 2. Resolve effective values for balance calculations ─────────────────
+    const oldStatus = old.status;
+    const newStatus: TxStatus = input.status ?? oldStatus;
+
+    const newAmount =
+      input.amount != null
+        ? new Decimal(input.amount).abs()
+        : new Decimal(old.amount.toString());
+    const newType: TxType = input.type ?? old.type;
+    const newAccountId = input.accountId ?? old.accountId;
+    // transferAccountId is intentionally immutable via this endpoint
+    const transferAccountId = old.transferAccountId;
+
+    // ── 3. Balance deltas (atomic with the record update) ────────────────────
+    if (oldStatus === "VERIFIED" && newStatus !== "VERIFIED") {
+      // Transitioning OUT of VERIFIED → reverse the old balance impact
+      await applyBalanceDelta(tx, old, true);
+    } else if (oldStatus !== "VERIFIED" && newStatus === "VERIFIED") {
+      // Transitioning INTO VERIFIED → apply new (potentially edited) values
+      await applyBalanceDelta(tx, {
+        accountId: newAccountId,
+        transferAccountId,
+        type: newType,
+        amount: newAmount,
+      });
+    } else if (oldStatus === "VERIFIED" && newStatus === "VERIFIED") {
+      // Staying VERIFIED but amount/type/account may have changed → re-settle
+      await applyBalanceDelta(tx, old, true); // reverse old impact
+      await applyBalanceDelta(tx, {
+        accountId: newAccountId,
+        transferAccountId,
+        type: newType,
+        amount: newAmount,
+      }); // apply new impact
+    }
+    // Both non-VERIFIED → no balance changes needed
+
+    // ── 4. GST amount resolution ─────────────────────────────────────────────
+    let gstAmountValue: string | undefined;
+    if (input.gstAmount !== undefined) {
+      // Explicit override wins
+      gstAmountValue = new Decimal(input.gstAmount).abs().toFixed(2);
+    } else if (input.gstApplicable === false) {
+      // Turning off GST → zero out
+      gstAmountValue = "0.00";
+    }
+    // Otherwise: leave unchanged (undefined → Prisma skips the field)
+
+    // ── 5. verifiedAt bookkeeping ─────────────────────────────────────────────
+    let verifiedAtValue: Date | null | undefined;
+    if (oldStatus !== "VERIFIED" && newStatus === "VERIFIED") {
+      verifiedAtValue = new Date();
+    } else if (oldStatus === "VERIFIED" && newStatus !== "VERIFIED") {
+      verifiedAtValue = null;
+    }
+    // If no status change: leave verifiedAt untouched (undefined)
+
+    // ── 6. Persist update ────────────────────────────────────────────────────
+    const updated = await tx.transaction.update({
+      where: { id: txId },
+      data: {
+        type: input.type,
+        amount:
+          input.amount !== undefined ? newAmount.toFixed(2) : undefined,
+        date: input.date,
+        vendor: input.vendor,
+        description: input.description,
+        notes: input.notes,
+        categoryId: input.categoryId,
+        accountId: input.accountId,
+        gstApplicable: input.gstApplicable,
+        gstAmount: gstAmountValue,
+        gstInclusive: input.gstInclusive,
+        isDeductible: input.isDeductible,
+        deductiblePercent: input.deductiblePercent,
+        status: input.status,
+        verifiedAt: verifiedAtValue,
+      },
+    });
+
+    // ── 7. Audit log with field-level diff ───────────────────────────────────
+    /** Normalise any field value to a JSON-safe string or null */
+    function toAuditStr(v: unknown): string | null {
+      if (v === null || v === undefined) return null;
+      if (v instanceof Date) return v.toISOString();
+      return String(v);
+    }
+
+    const diffFields = [
+      "type",
+      "amount",
+      "date",
+      "vendor",
+      "description",
+      "notes",
+      "categoryId",
+      "accountId",
+      "gstApplicable",
+      "gstAmount",
+      "gstInclusive",
+      "isDeductible",
+      "deductiblePercent",
+      "status",
+      "verifiedAt",
+    ] as const;
+
+    type DiffRecord = Record<string, { old: string | null; new: string | null }>;
+    const changes: DiffRecord = {};
+
+    for (const field of diffFields) {
+      const o = toAuditStr(old[field]);
+      const n = toAuditStr(updated[field]);
+      if (o !== n) {
+        changes[field] = { old: o, new: n };
+      }
+    }
+
+    await tx.auditLog.create({
+      data: {
+        userId: input.userId,
+        entityType: "transaction",
+        entityId: txId,
+        action: "updated",
+        changes: changes as unknown as Prisma.InputJsonValue,
+      },
+    });
+
+    return updated;
   });
 }
 

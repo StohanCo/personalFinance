@@ -1,9 +1,13 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useState } from "react";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import AddAccountModal from "./AddAccountModal";
 import AddTransactionModal from "./AddTransactionModal";
+import TransactionsSection from "./TransactionsSection";
+import BudgetsSection from "./BudgetsSection";
+import StatsSection from "./StatsSection";
+import AnalyticsSection from "./AnalyticsSection";
 
 type Account = {
   id: string; name: string; type: string; currency: string;
@@ -15,7 +19,7 @@ type Transaction = {
   date: string; vendor: string | null; description: string | null;
   categoryName: string | null; accountName: string; currency: string;
 };
-type Category = { id: string; nameEn: string; type: string };
+type Category = { id: string; key: string; nameEn: string; type: string; color: string };
 type Summary = {
   totalBalance: string;
   totalBalanceNzd: string | null;
@@ -24,8 +28,9 @@ type Summary = {
   fxCheckedAt: string | null;
   fxProvider: string | null;
   currencies: string[];
+  rawBalancesByCurrency: { currency: string; total: string }[];
 };
-type SectionId = "overview" | "accounts" | "transactions" | "budgets" | "analytics" | "receipts" | "tax";
+type SectionId = "overview" | "accounts" | "transactions" | "budgets" | "analytics" | "stats" | "receipts" | "tax";
 
 const SECTIONS: { id: SectionId; label: string }[] = [
   { id: "overview", label: "Overview" },
@@ -33,6 +38,7 @@ const SECTIONS: { id: SectionId; label: string }[] = [
   { id: "transactions", label: "Transactions" },
   { id: "budgets", label: "Budgets" },
   { id: "analytics", label: "Analytics" },
+  { id: "stats", label: "Stats" },
   { id: "receipts", label: "Receipts" },
   { id: "tax", label: "Tax" },
 ];
@@ -74,20 +80,6 @@ export default function Dashboard({
     }
     setActiveSection("overview");
   }, [searchParams]);
-
-  const expenseByCategory = useMemo(() => {
-    const totals = new Map<string, number>();
-    for (const t of transactions) {
-      if (t.type !== "EXPENSE") continue;
-      const key = t.categoryName ?? "Uncategorised";
-      totals.set(key, (totals.get(key) ?? 0) + Number(t.amount));
-    }
-
-    return [...totals.entries()]
-      .map(([name, amount]) => ({ name, amount }))
-      .sort((a, b) => b.amount - a.amount)
-      .slice(0, 6);
-  }, [transactions]);
 
   function navigate(section: SectionId) {
     setActiveSection(section);
@@ -160,12 +152,27 @@ export default function Dashboard({
       {activeSection === "overview" && (
         <>
           <div className="mb-8 mt-6 grid grid-cols-1 gap-4 sm:grid-cols-3">
-            <SummaryCard
-              label="Net Worth (Original)"
-              value={fmt(summary.totalBalance)}
-              sub="raw sum across account currencies"
-              accent="emerald"
-            />
+            {summary.rawBalancesByCurrency.length > 1 ? (
+              <div className="rounded-xl border border-emerald-900/60 bg-gradient-to-br from-emerald-950/80 to-slate-900/80 px-5 py-4 shadow-lg shadow-emerald-950/50 backdrop-blur-sm">
+                <p className="text-xs font-medium uppercase tracking-widest text-slate-500">Raw Net Worth (by currency)</p>
+                <div className="mt-2 space-y-1.5">
+                  {summary.rawBalancesByCurrency.map((item) => (
+                    <div key={item.currency} className="flex items-center justify-between text-sm">
+                      <span className="text-slate-300">{item.currency}</span>
+                      <span className="font-semibold text-emerald-300">{fmt(item.total, item.currency)}</span>
+                    </div>
+                  ))}
+                </div>
+                <p className="mt-2 text-xs text-slate-600">Separated because multiple account currencies are present.</p>
+              </div>
+            ) : (
+              <SummaryCard
+                label="Net Worth (Original)"
+                value={fmt(summary.totalBalance)}
+                sub="raw sum across account currencies"
+                accent="emerald"
+              />
+            )}
             <SummaryCard
               label="Income This Month"
               value={fmt(summary.monthIncome)}
@@ -319,61 +326,23 @@ export default function Dashboard({
       )}
 
       {activeSection === "transactions" && (
-        <section className="mt-6 rounded-2xl border border-slate-800 bg-slate-900/70 p-4">
-          <div className="mb-4 flex items-center justify-between">
-            <h2 className="text-lg font-semibold text-white">Transaction Journal</h2>
-            <button
-              onClick={() => setShowAddTx(true)}
-              disabled={accounts.length === 0}
-              className="rounded-lg bg-emerald-600 px-3 py-1.5 text-sm font-medium text-white disabled:opacity-40"
-            >
-              Add Transaction
-            </button>
-          </div>
-          <p className="mb-3 text-sm text-slate-400">Use this section to capture richer transaction details. Full editing workflow ships in the next phase.</p>
-          <div className="space-y-2">
-            {transactions.map((t) => (
-              <div key={t.id} className="rounded-xl border border-slate-800 bg-slate-900/60 px-4 py-3">
-                <p className="text-sm font-medium text-white">{t.vendor ?? t.description ?? "Unnamed"}</p>
-                <p className="mt-1 text-xs text-slate-500">{t.accountName} · {fmtDate(t.date)} · {t.categoryName ?? "Uncategorised"}</p>
-              </div>
-            ))}
-          </div>
-        </section>
+        <TransactionsSection
+          accounts={accounts}
+          categories={categories}
+          onAddTransaction={() => setShowAddTx(true)}
+        />
       )}
 
       {activeSection === "budgets" && (
-        <section className="mt-6 rounded-2xl border border-slate-800 bg-slate-900/70 p-5">
-          <h2 className="text-lg font-semibold text-white">Budgets</h2>
-          <p className="mt-2 text-sm text-slate-400">Budget creation panel is queued next. Navigation is ready and this section will host per-category budget controls.</p>
-        </section>
+        <BudgetsSection categories={categories} />
       )}
 
       {activeSection === "analytics" && (
-        <section className="mt-6 rounded-2xl border border-slate-800 bg-slate-900/70 p-5">
-          <h2 className="text-lg font-semibold text-white">Main Spending Graphs</h2>
-          {expenseByCategory.length === 0 ? (
-            <p className="mt-2 text-sm text-slate-400">No expenses yet to plot.</p>
-          ) : (
-            <div className="mt-4 space-y-3">
-              {expenseByCategory.map((row) => {
-                const max = expenseByCategory[0]?.amount ?? 1;
-                const width = Math.max(8, Math.round((row.amount / max) * 100));
-                return (
-                  <div key={row.name}>
-                    <div className="mb-1 flex items-center justify-between text-xs text-slate-400">
-                      <span>{row.name}</span>
-                      <span>{fmt(row.amount)}</span>
-                    </div>
-                    <div className="h-2 rounded-full bg-slate-800">
-                      <div className="h-full rounded-full bg-gradient-to-r from-cyan-500 to-emerald-500" style={{ width: `${width}%` }} />
-                    </div>
-                  </div>
-                );
-              })}
-            </div>
-          )}
-        </section>
+        <AnalyticsSection accounts={accounts} />
+      )}
+
+      {activeSection === "stats" && (
+        <StatsSection />
       )}
 
       {activeSection === "receipts" && (

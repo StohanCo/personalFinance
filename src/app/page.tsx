@@ -34,6 +34,17 @@ export default async function DashboardPage() {
     new Decimal(0),
   );
 
+  const rawBalancesByCurrencyMap = accounts.reduce((acc, a) => {
+    const current = acc.get(a.currency) ?? new Decimal(0);
+    acc.set(a.currency, current.plus(a.balance));
+    return acc;
+  }, new Map<string, Decimal>());
+
+  const rawBalancesByCurrency = [...rawBalancesByCurrencyMap.entries()].map(([currency, total]) => ({
+    currency,
+    total: total.toFixed(2),
+  }));
+
   const distinctCurrencies = [...new Set(accounts.map((a) => a.currency))];
   let totalBalanceNzd: string | null = null;
   let fxCheckedAt: string | null = null;
@@ -107,8 +118,10 @@ export default async function DashboardPage() {
         }))}
         categories={categories.map((c) => ({
           id: c.id,
+          key: c.key,
           nameEn: c.nameEn,
           type: c.type,
+          color: c.color,
         }))}
         summary={{
           totalBalance: totalBalance.toFixed(2),
@@ -118,6 +131,7 @@ export default async function DashboardPage() {
           fxCheckedAt,
           fxProvider,
           currencies: distinctCurrencies,
+          rawBalancesByCurrency,
         }}
       />
     </div>

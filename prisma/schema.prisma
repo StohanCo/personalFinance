@@ -329,6 +329,19 @@ model TaxYear {
   @@index([userId])
 }
 
+// FX rate snapshots captured from external providers
+model FxRate {
+  id         String   @id @default(cuid())
+  base       String   @default("NZD")
+  symbol     String   // e.g. "USD", "RUB"
+  rate       Decimal  @db.Decimal(18, 6)
+  provider   String
+  capturedAt DateTime @default(now())
+
+  @@index([symbol, capturedAt])
+  @@index([capturedAt])
+}
+
 // Append-only audit trail for everything that matters for tax
 model AuditLog {
   id     String  @id @default(cuid())

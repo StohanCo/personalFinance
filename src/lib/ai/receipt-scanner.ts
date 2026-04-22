@@ -58,7 +58,13 @@ function buildUserPrompt(): string {
 Rules:
 - If NZ receipt shows a total but no explicit GST line, calculate gstAmount = total * 3/23 rounded to 2 dp.
 - Default currency to NZD if receipt looks like NZ.
-- Equipment, software, SaaS, professional development, business insurance, accounting, business travel, and business meals are typically deductible for IT contractors. Groceries, personal dining, and personal rent are not.`;
+- Equipment, software, SaaS, professional development, business insurance, accounting, business travel, and business meals are typically deductible for IT contractors. Groceries, personal dining, and personal rent are not.
+
+Additional extraction requirements:
+- Capture as many visible line items as possible in the items array, not just a summary line.
+- Include individual product/service lines with their line price when readable.
+- If line-item prices are partially unreadable, still include the item name and set price to 0 for that line.
+- Ensure total reflects the final paid amount shown on the receipt.`;
 }
 
 export async function scanReceipt(params: {

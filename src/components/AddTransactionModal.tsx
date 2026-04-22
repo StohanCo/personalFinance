@@ -4,7 +4,22 @@ import { useState } from "react";
 import { useRouter } from "next/navigation";
 
 type Account = { id: string; name: string; type: string; currency: string };
-type Category = { id: string; nameEn: string; type: string };
+type Category = { id: string; key: string; nameEn: string; type: string };
+
+type ReceiptExtraction = {
+  vendor: string | null;
+  date: string | null;
+  total: number | null;
+  currency: "NZD" | "USD" | "EUR" | "AUD" | "GBP" | "RUB" | "other";
+  gstApplicable: boolean;
+  gstAmount: number | null;
+  gstInclusive: boolean;
+  items: Array<{ name: string; price: number }>;
+  category: string;
+  likelyDeductibleForItContractor: boolean;
+  confidence: "high" | "medium" | "low";
+  notes?: string;
+};
 
 const today = () => new Date().toISOString().slice(0, 10);
 
@@ -26,17 +41,84 @@ export default function AddTransactionModal({
     date: today(),
     vendor: "",
     description: "",
+    notes: "",
     gstApplicable: false,
+    gstAmount: "",
+    gstInclusive: true,
     isDeductible: false,
     deductiblePercent: "0",
     transferAccountId: "",
+    receiptId: "",
   });
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
+  const [scanLoading, setScanLoading] = useState(false);
+  const [scanError, setScanError] = useState("");
+  const [scanResult, setScanResult] = useState<ReceiptExtraction | null>(null);
 
   const filteredCats = categories.filter(
     (c) => c.type === form.type || form.type === "TRANSFER",
   );
+
+  async function scanReceiptFile(file: File) {
+    setScanLoading(true);
+    setScanError("");
+
+    try {
+      const formData = new FormData();
+      formData.append("file", file);
+
+      const res = await fetch("/api/receipts/scan", {
+        method: "POST",
+        body: formData,
+      });
+
+      const data = await res.json() as {
+        error?: string;
+        receipt?: { id: string };
+        extracted?: ReceiptExtraction;
+      };
+
+      if (!res.ok || !data.receipt || !data.extracted) {
+        throw new Error(data.error ?? "Failed to scan receipt");
+      }
+
+      const matchedCategory = categories.find(
+        (c) => c.key === data.extracted?.category && c.type === "EXPENSE",
+      );
+      const itemNotes = data.extracted.items.length
+        ? `Receipt items:\n${data.extracted.items.map((item) => `- ${item.name}: ${item.price.toFixed(2)}`).join("\n")}`
+        : "";
+
+      setForm((prev) => ({
+        ...prev,
+        type: "EXPENSE",
+        categoryId: matchedCategory?.id ?? prev.categoryId,
+        amount: data.extracted?.total != null ? data.extracted.total.toFixed(2) : prev.amount,
+        date: data.extracted?.date ?? prev.date,
+        vendor: data.extracted?.vendor ?? prev.vendor,
+        description: data.extracted?.notes ?? prev.description,
+        notes: [itemNotes, data.extracted?.notes ?? ""].filter(Boolean).join("\n\n"),
+        gstApplicable: data.extracted?.gstApplicable ?? prev.gstApplicable,
+        gstAmount: data.extracted?.gstAmount != null ? data.extracted.gstAmount.toFixed(2) : prev.gstAmount,
+        gstInclusive: data.extracted?.gstInclusive ?? prev.gstInclusive,
+        isDeductible: data.extracted?.likelyDeductibleForItContractor ?? prev.isDeductible,
+        deductiblePercent: data.extracted?.likelyDeductibleForItContractor ? "100" : prev.deductiblePercent,
+        receiptId: data.receipt?.id ?? prev.receiptId,
+      }));
+      setScanResult(data.extracted);
+    } catch (err) {
+      setScanError(err instanceof Error ? err.message : "Scan failed");
+    } finally {
+      setScanLoading(false);
+    }
+  }
+
+  function clearScannedReceipt() {
+    setScanResult(null);
+    setScanError("");
+    setForm((prev) => ({ ...prev, receiptId: "", notes: "", gstAmount: "" }));
+  }
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
@@ -53,9 +135,13 @@ export default function AddTransactionModal({
       date: form.date,
       vendor: form.vendor || undefined,
       description: form.description || undefined,
+      notes: form.notes || undefined,
       gstApplicable: form.gstApplicable,
+      gstAmount: form.gstAmount ? parseFloat(form.gstAmount) : undefined,
+      gstInclusive: form.gstInclusive,
       isDeductible: form.isDeductible,
       deductiblePercent: parseInt(form.deductiblePercent) || 0,
+      receiptId: form.receiptId || undefined,
     };
     if (form.type === "TRANSFER" && form.transferAccountId) {
       body.transferAccountId = form.transferAccountId;
@@ -95,6 +181,59 @@ export default function AddTransactionModal({
           {error && (
             <p className="rounded-lg bg-red-900/40 px-4 py-2 text-sm text-red-400">{error}</p>
           )}
+
+          <div className="rounded-xl border border-cyan-800/60 bg-cyan-950/20 p-3">
+            <div className="flex items-center justify-between gap-3">
+              <div>
+                <p className="text-sm font-medium text-cyan-200">Upload receipt to auto-fill</p>
+                <p className="text-xs text-slate-400">Scans total, GST, and line items for spend navigation.</p>
+              </div>
+              {form.receiptId && (
+                <button
+                  type="button"
+                  onClick={clearScannedReceipt}
+                  className="rounded-lg border border-slate-700 px-2.5 py-1 text-xs text-slate-300 transition hover:border-slate-500"
+                >
+                  Clear scan
+                </button>
+              )}
+            </div>
+
+            <label className="mt-3 block cursor-pointer rounded-lg border border-dashed border-cyan-700/70 px-3 py-3 text-center text-sm text-cyan-100 transition hover:border-cyan-500">
+              <input
+                type="file"
+                accept="image/*"
+                className="hidden"
+                disabled={scanLoading}
+                onChange={(e) => {
+                  const file = e.target.files?.[0];
+                  if (file) {
+                    void scanReceiptFile(file);
+                  }
+                }}
+              />
+              {scanLoading ? "Scanning receipt..." : "Choose receipt image"}
+            </label>
+
+            {scanError && <p className="mt-2 text-xs text-red-400">{scanError}</p>}
+
+            {scanResult && (
+              <div className="mt-3 rounded-lg border border-slate-800 bg-slate-900/60 p-3">
+                <p className="text-xs uppercase tracking-wider text-slate-500">Scan result ({scanResult.confidence})</p>
+                <p className="mt-1 text-sm text-slate-200">
+                  Total: {scanResult.total != null ? scanResult.total.toFixed(2) : "n/a"} {scanResult.currency}
+                  {scanResult.gstApplicable ? ` · GST ${scanResult.gstAmount != null ? scanResult.gstAmount.toFixed(2) : "estimated"}` : " · GST n/a"}
+                </p>
+                {scanResult.items.length > 0 && (
+                  <div className="mt-2 max-h-28 space-y-1 overflow-y-auto text-xs text-slate-400">
+                    {scanResult.items.slice(0, 20).map((item, idx) => (
+                      <p key={`${item.name}-${idx}`}>{item.name} · {item.price.toFixed(2)}</p>
+                    ))}
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
 
           {/* Type selector */}
           <div>
@@ -184,6 +323,17 @@ export default function AddTransactionModal({
             </div>
           </div>
 
+          <div>
+            <label className="mb-1.5 block text-sm font-medium text-slate-300">Notes (optional)</label>
+            <textarea
+              value={form.notes}
+              onChange={(e) => setForm({ ...form, notes: e.target.value })}
+              rows={3}
+              placeholder="Receipt line items and context"
+              className={inputCls}
+            />
+          </div>
+
           {/* GST + Deductible toggles */}
           <div className="grid grid-cols-2 gap-3">
             <label className="flex cursor-pointer items-center gap-3 rounded-lg border border-slate-700 px-3 py-2.5 transition hover:border-slate-600">
@@ -205,6 +355,21 @@ export default function AddTransactionModal({
               <span className="text-sm text-slate-300">Tax Deductible</span>
             </label>
           </div>
+
+          {form.gstApplicable && (
+            <div>
+              <label className="mb-1.5 block text-sm font-medium text-slate-300">GST Amount (optional)</label>
+              <input
+                type="number"
+                step="0.01"
+                min="0"
+                value={form.gstAmount}
+                onChange={(e) => setForm({ ...form, gstAmount: e.target.value })}
+                placeholder="Auto-calculated if left blank"
+                className={inputCls}
+              />
+            </div>
+          )}
 
           {form.isDeductible && (
             <div>
