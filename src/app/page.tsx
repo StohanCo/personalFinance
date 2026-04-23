@@ -67,7 +67,23 @@ export default async function DashboardPage() {
   }));
 
   const distinctCurrencies = [...new Set(accounts.map((a) => a.currency))];
+  const now = new Date();
+  const monthStart = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1));
+
+  const monthIncomeTxs = recentTxs.filter(
+    (t) => t.type === "INCOME" && t.status === "VERIFIED" && new Date(t.date) >= monthStart,
+  );
+  const monthExpenseTxs = recentTxs.filter(
+    (t) => t.type === "EXPENSE" && t.status === "VERIFIED" && new Date(t.date) >= monthStart,
+  );
+
+  // Raw sums per currency (used as fallback when FX unavailable)
+  const monthIncome = monthIncomeTxs.reduce((s, t) => s.plus(t.amount), new Decimal(0));
+  const monthExpenses = monthExpenseTxs.reduce((s, t) => s.plus(t.amount), new Decimal(0));
+
   let totalBalanceNzd: string | null = null;
+  let monthIncomeNzd: string | null = null;
+  let monthExpensesNzd: string | null = null;
   let fxCheckedAt: string | null = null;
   let fxProvider: string | null = null;
 
@@ -80,23 +96,26 @@ export default async function DashboardPage() {
       const nzdAmount = convertToNzd(Number(a.balance.toString()), a.currency, fx.rates);
       return sum + nzdAmount;
     }, 0);
-
     totalBalanceNzd = roundMoney(converted).toFixed(2);
+
+    // Convert monthly totals to NZD so mixed-currency months display correctly
+    monthIncomeNzd = roundMoney(
+      monthIncomeTxs.reduce(
+        (sum, t) => sum + convertToNzd(Number(t.amount), t.account.currency, fx.rates),
+        0,
+      ),
+    ).toFixed(2);
+
+    monthExpensesNzd = roundMoney(
+      monthExpenseTxs.reduce(
+        (sum, t) => sum + convertToNzd(Number(t.amount), t.account.currency, fx.rates),
+        0,
+      ),
+    ).toFixed(2);
   } catch {
     // Keep dashboard available if FX provider is unavailable.
     totalBalanceNzd = null;
   }
-
-  const now = new Date();
-  const monthStart = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1));
-
-  const monthIncome = recentTxs
-    .filter((t) => t.type === "INCOME" && t.status === "VERIFIED" && new Date(t.date) >= monthStart)
-    .reduce((s, t) => s.plus(t.amount), new Decimal(0));
-
-  const monthExpenses = recentTxs
-    .filter((t) => t.type === "EXPENSE" && t.status === "VERIFIED" && new Date(t.date) >= monthStart)
-    .reduce((s, t) => s.plus(t.amount), new Decimal(0));
 
   return (
     <div className="min-h-screen bg-slate-950">
@@ -159,6 +178,8 @@ export default async function DashboardPage() {
           totalBalanceNzd,
           monthIncome: monthIncome.toFixed(2),
           monthExpenses: monthExpenses.toFixed(2),
+          monthIncomeNzd,
+          monthExpensesNzd,
           fxCheckedAt,
           fxProvider,
           currencies: distinctCurrencies,

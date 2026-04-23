@@ -25,6 +25,8 @@ type Summary = {
   totalBalanceNzd: string | null;
   monthIncome: string;
   monthExpenses: string;
+  monthIncomeNzd: string | null;
+  monthExpensesNzd: string | null;
   fxCheckedAt: string | null;
   fxProvider: string | null;
   currencies: string[];
@@ -175,15 +177,15 @@ export default function Dashboard({
               />
             )}
             <SummaryCard
-              label="Income This Month"
-              value={fmt(summary.monthIncome)}
-              sub="verified transactions"
+              label={summary.monthIncomeNzd && summary.currencies.length > 1 ? "Income This Month (NZD)" : "Income This Month"}
+              value={fmt(summary.monthIncomeNzd ?? summary.monthIncome)}
+              sub={summary.monthIncomeNzd && summary.currencies.length > 1 ? "NZD equivalent, verified" : "verified transactions"}
               accent="blue"
             />
             <SummaryCard
-              label="Expenses This Month"
-              value={fmt(summary.monthExpenses)}
-              sub="verified transactions"
+              label={summary.monthExpensesNzd && summary.currencies.length > 1 ? "Expenses This Month (NZD)" : "Expenses This Month"}
+              value={fmt(summary.monthExpensesNzd ?? summary.monthExpenses)}
+              sub={summary.monthExpensesNzd && summary.currencies.length > 1 ? "NZD equivalent, verified" : "verified transactions"}
               accent="rose"
             />
           </div>
@@ -431,9 +433,20 @@ function AccountDetailsModal({
     color: account.color,
     isArchived: account.isArchived ?? false,
   });
+  const [currenciesList, setCurrenciesList] = useState<string[]>(["NZD", "AUD", "USD", "EUR", "GBP", "RUB"]);
   const [loadingDetails, setLoadingDetails] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    fetch("/api/settings/currencies")
+      .then((r) => r.json())
+      .then((data: { currencies?: { code: string }[] }) => {
+        const codes = data.currencies?.map((c) => c.code) ?? [];
+        if (codes.length > 0) setCurrenciesList(codes);
+      })
+      .catch(() => {/* keep fallback */});
+  }, []);
 
   useEffect(() => {
     let cancelled = false;
@@ -567,7 +580,7 @@ function AccountDetailsModal({
             <div>
               <label className="mb-1.5 block text-sm font-medium text-slate-300">Currency</label>
               <select value={form.currency} onChange={(e) => setForm({ ...form, currency: e.target.value })} className={inputCls}>
-                {["NZD", "AUD", "USD", "EUR", "GBP", "RUB"].map((c) => (
+                {currenciesList.map((c) => (
                   <option key={c} value={c}>{c}</option>
                 ))}
               </select>
