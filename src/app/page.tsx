@@ -6,15 +6,7 @@ import Link from "next/link";
 import SignOutButton from "@/components/SignOutButton";
 import Dashboard from "@/components/Dashboard";
 import { convertToNzd, fetchNzdFxRates, roundMoney } from "@/lib/fx/exchange";
-
-const DEFAULT_CURRENCIES = [
-  { code: "NZD", label: "New Zealand Dollar", sortOrder: 1 },
-  { code: "AUD", label: "Australian Dollar",  sortOrder: 2 },
-  { code: "USD", label: "US Dollar",          sortOrder: 3 },
-  { code: "EUR", label: "Euro",               sortOrder: 4 },
-  { code: "GBP", label: "British Pound",      sortOrder: 5 },
-  { code: "RUB", label: "Russian Ruble",      sortOrder: 6 },
-];
+import { DEFAULT_CURRENCIES } from "@/lib/currencies";
 
 export default async function DashboardPage() {
   const session = await auth();

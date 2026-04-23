@@ -2,15 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/db/client";
 import { z } from "zod";
-
-export const DEFAULT_CURRENCIES = [
-  { code: "NZD", label: "New Zealand Dollar", sortOrder: 1 },
-  { code: "AUD", label: "Australian Dollar",  sortOrder: 2 },
-  { code: "USD", label: "US Dollar",          sortOrder: 3 },
-  { code: "EUR", label: "Euro",               sortOrder: 4 },
-  { code: "GBP", label: "British Pound",      sortOrder: 5 },
-  { code: "RUB", label: "Russian Ruble",      sortOrder: 6 },
-];
+import { DEFAULT_CURRENCIES } from "@/lib/currencies";
 
 /** GET — return the user's enabled currencies (seeds defaults on first call) */
 export async function GET() {
@@ -31,7 +23,7 @@ export async function GET() {
     await prisma.userCurrency.createMany({
       data: DEFAULT_CURRENCIES.map((c) => ({ ...c, userId })),
     });
-    currencies = DEFAULT_CURRENCIES;
+    currencies = DEFAULT_CURRENCIES.map((c) => ({ ...c }));
   }
 
   return NextResponse.json({ currencies });
