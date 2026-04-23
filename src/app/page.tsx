@@ -2,9 +2,19 @@ import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/db/client";
 import { redirect } from "next/navigation";
 import { Decimal } from "decimal.js";
+import Link from "next/link";
 import SignOutButton from "@/components/SignOutButton";
 import Dashboard from "@/components/Dashboard";
 import { convertToNzd, fetchNzdFxRates, roundMoney } from "@/lib/fx/exchange";
+
+const DEFAULT_CURRENCIES = [
+  { code: "NZD", label: "New Zealand Dollar", sortOrder: 1 },
+  { code: "AUD", label: "Australian Dollar",  sortOrder: 2 },
+  { code: "USD", label: "US Dollar",          sortOrder: 3 },
+  { code: "EUR", label: "Euro",               sortOrder: 4 },
+  { code: "GBP", label: "British Pound",      sortOrder: 5 },
+  { code: "RUB", label: "Russian Ruble",      sortOrder: 6 },
+];
 
 export default async function DashboardPage() {
   const session = await auth();
@@ -12,7 +22,7 @@ export default async function DashboardPage() {
 
   const userId = session.user.id;
 
-  const [accounts, recentTxs, categories] = await Promise.all([
+  const [accounts, recentTxs, categories, userCurrenciesDb] = await Promise.all([
     prisma.account.findMany({
       where: { userId, isArchived: false },
       orderBy: { createdAt: "asc" },
@@ -27,7 +37,26 @@ export default async function DashboardPage() {
       where: { OR: [{ userId }, { userId: null }] },
       orderBy: { sortOrder: "asc" },
     }),
+    prisma.userCurrency.findMany({
+      where: { userId },
+      orderBy: { sortOrder: "asc" },
+    }),
   ]);
+
+  let userCurrencies = userCurrenciesDb;
+  if (userCurrencies.length === 0) {
+    await prisma.userCurrency.createMany({
+      data: DEFAULT_CURRENCIES.map((c) => ({ ...c, userId })),
+    });
+    userCurrencies = DEFAULT_CURRENCIES.map((c) => ({
+      ...c,
+      id: "",
+      userId,
+      createdAt: new Date(),
+    }));
+  }
+
+  const enabledCurrencies = userCurrencies.map((c) => c.code);
 
   const totalBalance = accounts.reduce(
     (sum, a) => sum.plus(a.balance),
@@ -89,6 +118,16 @@ export default async function DashboardPage() {
           </div>
           <div className="flex items-center gap-3">
             <span className="hidden text-sm text-slate-500 sm:block">{session.user.email}</span>
+            <Link
+              href="/settings"
+              className="rounded-lg p-1.5 text-slate-400 transition hover:bg-slate-800 hover:text-white"
+              title="Settings"
+            >
+              <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <circle cx="12" cy="12" r="3"/>
+                <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/>
+              </svg>
+            </Link>
             <SignOutButton />
           </div>
         </div>
@@ -133,6 +172,7 @@ export default async function DashboardPage() {
           currencies: distinctCurrencies,
           rawBalancesByCurrency,
         }}
+        currencies={enabledCurrencies}
       />
     </div>
   );

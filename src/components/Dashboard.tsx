@@ -52,12 +52,13 @@ function fmtDate(iso: string) {
 }
 
 export default function Dashboard({
-  accounts, transactions, categories, summary,
+  accounts, transactions, categories, summary, currencies,
 }: {
   accounts: Account[];
   transactions: Transaction[];
   categories: Category[];
   summary: Summary;
+  currencies: string[];
 }) {
   const router = useRouter();
   const pathname = usePathname();
@@ -360,7 +361,7 @@ export default function Dashboard({
       )}
 
       {/* Modals */}
-      {showAddAccount && <AddAccountModal onClose={() => setShowAddAccount(false)} />}
+      {showAddAccount && <AddAccountModal currencies={currencies} onClose={() => setShowAddAccount(false)} />}
       {showAddTx && (
         <AddTransactionModal
           accounts={accounts}

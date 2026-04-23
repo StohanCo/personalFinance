@@ -14,12 +14,18 @@ const ACCOUNT_TYPES = [
   { value: "LOAN",     label: "Loan" },
 ];
 
-export default function AddAccountModal({ onClose }: { onClose: () => void }) {
+export default function AddAccountModal({
+  onClose,
+  currencies = ["NZD", "AUD", "USD", "EUR", "GBP", "RUB"],
+}: {
+  onClose: () => void;
+  currencies?: string[];
+}) {
   const router = useRouter();
   const [form, setForm] = useState({
     name: "",
     type: "CHECKING",
-    currency: "NZD",
+    currency: currencies[0] ?? "NZD",
     balance: "0",
     color: "#10b981",
     creditLimit: "",
@@ -135,7 +141,7 @@ export default function AddAccountModal({ onClose }: { onClose: () => void }) {
                 onChange={(e) => setForm({ ...form, currency: e.target.value })}
                 className="w-full rounded-lg border border-slate-700 bg-slate-800 px-3 py-2.5 text-sm text-white outline-none transition focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500/40"
               >
-                {["NZD", "AUD", "USD", "EUR", "GBP", "RUB"].map((c) => (
+                {currencies.map((c) => (
                   <option key={c}>{c}</option>
                 ))}
               </select>

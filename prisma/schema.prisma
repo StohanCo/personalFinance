@@ -87,6 +87,7 @@ model User {
   gstPeriods   GSTPeriod[]
   taxYears     TaxYear[]
   auditLogs    AuditLog[]
+  userCurrencies UserCurrency[]
 
   @@index([email])
 }
@@ -358,4 +359,18 @@ model AuditLog {
 
   @@index([entityType, entityId])
   @@index([userId, createdAt])
+}
+
+// Per-user list of currencies available for selection when creating accounts
+model UserCurrency {
+  id        String   @id @default(cuid())
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  code      String   // ISO 4217 code e.g. "USD"
+  label     String   // e.g. "US Dollar"
+  sortOrder Int      @default(100)
+  createdAt DateTime @default(now())
+
+  @@unique([userId, code])
+  @@index([userId])
 }
