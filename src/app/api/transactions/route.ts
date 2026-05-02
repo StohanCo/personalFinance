@@ -63,6 +63,7 @@ const ListQuerySchema = z.object({
   search: z.string().optional(),
   limit: z.coerce.number().int().min(1).max(200).default(50),
   cursor: z.string().optional(),
+  withCount: z.coerce.boolean().default(false),
 });
 
 export async function GET(req: NextRequest) {
@@ -91,7 +92,7 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({ error: parsed.error.flatten() }, { status: 400 });
   }
 
-  const { type, status, accountId, dateFrom, dateTo, search, limit, cursor } =
+  const { type, status, accountId, dateFrom, dateTo, search, limit, cursor, withCount } =
     parsed.data;
 
   // ── Build where clause ────────────────────────────────────────────────────
@@ -120,17 +121,18 @@ export async function GET(req: NextRequest) {
   };
 
   // ── Cursor-based pagination ───────────────────────────────────────────────
+  // count(*) is opt-in via ?withCount=1; default response uses hasMore from cursor.
+  const rowsPromise = prisma.transaction.findMany({
+    where,
+    include: txInclude,
+    orderBy: [{ date: "desc" }, { id: "desc" }],
+    take: limit + 1,
+    ...(cursor ? { cursor: { id: cursor }, skip: 1 } : {}),
+  });
+
   const [rows, total] = await Promise.all([
-    prisma.transaction.findMany({
-      where,
-      include: txInclude,
-      orderBy: [{ date: "desc" }, { id: "desc" }],
-      take: limit + 1,
-      ...(cursor
-        ? { cursor: { id: cursor }, skip: 1 }
-        : {}),
-    }),
-    prisma.transaction.count({ where }),
+    rowsPromise,
+    withCount ? prisma.transaction.count({ where }) : Promise.resolve(null),
   ]);
 
   let nextCursor: string | null = null;
@@ -142,7 +144,8 @@ export async function GET(req: NextRequest) {
   return NextResponse.json({
     transactions: rows.map(formatTx),
     nextCursor,
-    total,
+    hasMore: nextCursor !== null,
+    total, // null unless ?withCount=1
   });
 }
 

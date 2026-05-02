@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useState, type ReactNode } from "react";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import AddAccountModal from "./AddAccountModal";
 import AddTransactionModal from "./AddTransactionModal";
@@ -22,13 +22,8 @@ type Transaction = {
 type Category = { id: string; key: string; nameEn: string; type: string; color: string };
 type Summary = {
   totalBalance: string;
-  totalBalanceNzd: string | null;
   monthIncome: string;
   monthExpenses: string;
-  monthIncomeNzd: string | null;
-  monthExpensesNzd: string | null;
-  fxCheckedAt: string | null;
-  fxProvider: string | null;
   currencies: string[];
   rawBalancesByCurrency: { currency: string; total: string }[];
 };
@@ -54,13 +49,14 @@ function fmtDate(iso: string) {
 }
 
 export default function Dashboard({
-  accounts, transactions, categories, summary, currencies,
+  accounts, transactions, categories, summary, currencies, fxSlot,
 }: {
   accounts: Account[];
   transactions: Transaction[];
   categories: Category[];
   summary: Summary;
   currencies: string[];
+  fxSlot: ReactNode;
 }) {
   const router = useRouter();
   const pathname = usePathname();
@@ -69,11 +65,6 @@ export default function Dashboard({
   const [showAddTx, setShowAddTx] = useState(false);
   const [activeSection, setActiveSection] = useState<SectionId>("overview");
   const [selectedAccount, setSelectedAccount] = useState<Account | null>(null);
-  const [nzdTotal, setNzdTotal] = useState<string | null>(summary.totalBalanceNzd);
-  const [fxCheckedAt, setFxCheckedAt] = useState<string | null>(summary.fxCheckedAt);
-  const [fxProvider, setFxProvider] = useState<string | null>(summary.fxProvider);
-  const [fxLoading, setFxLoading] = useState(false);
-  const [fxError, setFxError] = useState<string | null>(null);
 
   useEffect(() => {
     const section = searchParams.get("section");
@@ -89,39 +80,6 @@ export default function Dashboard({
     const params = new URLSearchParams(searchParams.toString());
     params.set("section", section);
     router.replace(`${pathname}?${params.toString()}`, { scroll: false });
-  }
-
-  async function recheckFx() {
-    setFxLoading(true);
-    setFxError(null);
-
-    try {
-      const res = await fetch("/api/fx/latest", { cache: "no-store" });
-      const data = await res.json() as {
-        rates?: Record<string, number>;
-        updatedAt?: string | null;
-        provider?: string;
-      };
-
-      if (!res.ok || !data.rates) {
-        throw new Error("Failed to load exchange rates");
-      }
-
-      const convertedTotal = accounts.reduce((sum, a) => {
-        if (a.currency === "NZD") return sum + Number(a.balance);
-        const rateFromNzd = data.rates?.[a.currency];
-        if (!rateFromNzd || rateFromNzd <= 0) return sum + Number(a.balance);
-        return sum + Number(a.balance) / rateFromNzd;
-      }, 0);
-
-      setNzdTotal((Math.round(convertedTotal * 100) / 100).toFixed(2));
-      setFxCheckedAt(data.updatedAt ?? null);
-      setFxProvider(data.provider ?? null);
-    } catch (error) {
-      setFxError(error instanceof Error ? error.message : "Failed to refresh rates");
-    } finally {
-      setFxLoading(false);
-    }
   }
 
   return (
@@ -177,43 +135,20 @@ export default function Dashboard({
               />
             )}
             <SummaryCard
-              label={summary.monthIncomeNzd && summary.currencies.length > 1 ? "Income This Month (NZD)" : "Income This Month"}
-              value={fmt(summary.monthIncomeNzd ?? summary.monthIncome)}
-              sub={summary.monthIncomeNzd && summary.currencies.length > 1 ? "NZD equivalent, verified" : "verified transactions"}
+              label="Income This Month"
+              value={fmt(summary.monthIncome)}
+              sub={summary.currencies.length > 1 ? "raw sum, verified — see FX panel for NZD" : "verified transactions"}
               accent="blue"
             />
             <SummaryCard
-              label={summary.monthExpensesNzd && summary.currencies.length > 1 ? "Expenses This Month (NZD)" : "Expenses This Month"}
-              value={fmt(summary.monthExpensesNzd ?? summary.monthExpenses)}
-              sub={summary.monthExpensesNzd && summary.currencies.length > 1 ? "NZD equivalent, verified" : "verified transactions"}
+              label="Expenses This Month"
+              value={fmt(summary.monthExpenses)}
+              sub={summary.currencies.length > 1 ? "raw sum, verified — see FX panel for NZD" : "verified transactions"}
               accent="rose"
             />
           </div>
 
-          <div className="mb-8 rounded-2xl border border-slate-800 bg-slate-900/70 p-4">
-            <div className="flex flex-wrap items-center justify-between gap-3">
-              <div>
-                <p className="text-xs uppercase tracking-widest text-cyan-300/80">FX Normalized Total</p>
-                <p className="mt-1 text-2xl font-bold text-white">{nzdTotal ? fmt(nzdTotal, "NZD") : "Unavailable"}</p>
-                <p className="text-xs text-slate-500">
-                  {summary.currencies.length > 1
-                    ? `Converted from: ${summary.currencies.join(", ")}`
-                    : "All balances already in NZD"}
-                </p>
-                {(fxCheckedAt || fxProvider) && (
-                  <p className="mt-1 text-xs text-slate-500">Source: {fxProvider ?? "public API"} {fxCheckedAt ? `· ${new Date(fxCheckedAt).toLocaleString("en-NZ")}` : ""}</p>
-                )}
-              </div>
-              <button
-                onClick={recheckFx}
-                disabled={fxLoading}
-                className="rounded-lg border border-cyan-400/40 bg-cyan-500/10 px-3 py-2 text-sm font-medium text-cyan-200 transition hover:bg-cyan-500/20 disabled:opacity-50"
-              >
-                {fxLoading ? "Checking..." : "Recheck via public FX API"}
-              </button>
-            </div>
-            {fxError && <p className="mt-2 text-xs text-red-400">{fxError}</p>}
-          </div>
+          {fxSlot}
 
           <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
             <section>
@@ -374,6 +309,7 @@ export default function Dashboard({
       {selectedAccount && (
         <AccountDetailsModal
           account={selectedAccount}
+          currencies={currencies}
           onClose={() => setSelectedAccount(null)}
         />
       )}
@@ -416,9 +352,11 @@ function AccountRow({ account, onClick }: { account: Account; onClick: () => voi
 
 function AccountDetailsModal({
   account,
+  currencies,
   onClose,
 }: {
   account: Account;
+  currencies: string[];
   onClose: () => void;
 }) {
   const router = useRouter();
@@ -433,76 +371,9 @@ function AccountDetailsModal({
     color: account.color,
     isArchived: account.isArchived ?? false,
   });
-  const [currenciesList, setCurrenciesList] = useState<string[]>(["NZD", "AUD", "USD", "EUR", "GBP", "RUB"]);
-  const [loadingDetails, setLoadingDetails] = useState(false);
+  const currenciesList = currencies.length > 0 ? currencies : ["NZD", "AUD", "USD", "EUR", "GBP", "RUB"];
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
-
-  useEffect(() => {
-    fetch("/api/settings/currencies")
-      .then((r) => r.json())
-      .then((data: { currencies?: { code: string }[] }) => {
-        const codes = data.currencies?.map((c) => c.code) ?? [];
-        if (codes.length > 0) setCurrenciesList(codes);
-      })
-      .catch(() => {/* keep fallback */});
-  }, []);
-
-  useEffect(() => {
-    let cancelled = false;
-
-    async function loadAccount() {
-      setLoadingDetails(true);
-      try {
-        const res = await fetch(`/api/accounts/${account.id}`, { cache: "no-store" });
-        if (!res.ok) {
-          throw new Error("Failed to load account details");
-        }
-
-        const data = await res.json() as {
-          account?: {
-            name: string;
-            type: string;
-            currency: string;
-            balance: string;
-            creditLimit: string | null;
-            apr: string | null;
-            notes: string | null;
-            color: string;
-            isArchived: boolean;
-          };
-        };
-
-        if (!cancelled && data.account) {
-          setForm({
-            name: data.account.name,
-            type: data.account.type,
-            currency: data.account.currency,
-            balance: data.account.balance,
-            creditLimit: data.account.creditLimit ?? "",
-            apr: data.account.apr ?? "",
-            notes: data.account.notes ?? "",
-            color: data.account.color,
-            isArchived: data.account.isArchived,
-          });
-        }
-      } catch {
-        if (!cancelled) {
-          setError("Failed to load account details");
-        }
-      } finally {
-        if (!cancelled) {
-          setLoadingDetails(false);
-        }
-      }
-    }
-
-    void loadAccount();
-
-    return () => {
-      cancelled = true;
-    };
-  }, [account.id]);
 
   async function save() {
     setLoading(true);
@@ -617,8 +488,8 @@ function AccountDetailsModal({
 
           <div className="flex gap-3 pt-2">
             <button type="button" onClick={onClose} className="flex-1 rounded-lg border border-slate-700 py-2.5 text-sm font-medium text-slate-400 transition hover:border-slate-500 hover:text-white">Cancel</button>
-            <button type="button" disabled={loading || loadingDetails} onClick={save} className="flex-1 rounded-lg bg-cyan-600 py-2.5 text-sm font-medium text-white transition hover:bg-cyan-500 disabled:opacity-50">
-              {loading ? "Saving..." : loadingDetails ? "Loading..." : "Save Details"}
+            <button type="button" disabled={loading} onClick={save} className="flex-1 rounded-lg bg-cyan-600 py-2.5 text-sm font-medium text-white transition hover:bg-cyan-500 disabled:opacity-50">
+              {loading ? "Saving..." : "Save Details"}
             </button>
           </div>
         </div>

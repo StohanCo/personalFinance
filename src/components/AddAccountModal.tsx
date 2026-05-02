@@ -1,5 +1,5 @@
 "use client";
-import { useState, useEffect } from "react";
+import { useState } from "react";
 import { useRouter } from "next/navigation";
 
 const COLORS = [
@@ -16,36 +16,22 @@ const ACCOUNT_TYPES = [
 
 export default function AddAccountModal({
   onClose,
-  currencies: initialCurrencies = ["NZD", "AUD", "USD", "EUR", "GBP", "RUB"],
+  currencies = ["NZD", "AUD", "USD", "EUR", "GBP", "RUB"],
 }: {
   onClose: () => void;
   currencies?: string[];
 }) {
   const router = useRouter();
-  const [currencies, setCurrencies] = useState<string[]>(initialCurrencies);
   const [form, setForm] = useState({
     name: "",
     type: "CHECKING",
-    currency: initialCurrencies[0] ?? "NZD",
+    currency: currencies[0] ?? "NZD",
     balance: "0",
     color: "#10b981",
     creditLimit: "",
   });
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
-
-  useEffect(() => {
-    fetch("/api/settings/currencies")
-      .then((r) => r.json())
-      .then((data: { currencies?: { code: string }[] }) => {
-        const codes = data.currencies?.map((c) => c.code) ?? [];
-        if (codes.length > 0) {
-          setCurrencies(codes);
-          setForm((f) => ({ ...f, currency: codes[0] ?? f.currency }));
-        }
-      })
-      .catch(() => {/* keep initial fallback */});
-  }, []);
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();

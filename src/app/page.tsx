@@ -1,11 +1,12 @@
 import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/db/client";
 import { redirect } from "next/navigation";
+import { Suspense } from "react";
 import { Decimal } from "decimal.js";
 import Link from "next/link";
 import SignOutButton from "@/components/SignOutButton";
 import Dashboard from "@/components/Dashboard";
-import { convertToNzd, fetchNzdFxRates, roundMoney } from "@/lib/fx/exchange";
+import FxNormalizedTotal from "@/components/FxNormalizedTotal";
 import { DEFAULT_CURRENCIES } from "@/lib/currencies";
 
 export default async function DashboardPage() {
@@ -14,14 +15,37 @@ export default async function DashboardPage() {
 
   const userId = session.user.id;
 
-  const [accounts, recentTxs, categories, userCurrenciesDb] = await Promise.all([
+  const now = new Date();
+  const monthStart = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1));
+  const monthEndExclusive = new Date(
+    Date.UTC(now.getUTCFullYear(), now.getUTCMonth() + 1, 1),
+  );
+
+  const [
+    accounts,
+    recentTxs,
+    categories,
+    userCurrenciesDb,
+    monthIncomeAgg,
+    monthExpensesAgg,
+  ] = await Promise.all([
     prisma.account.findMany({
       where: { userId, isArchived: false },
       orderBy: { createdAt: "asc" },
     }),
     prisma.transaction.findMany({
       where: { userId },
-      include: { category: true, account: { select: { name: true, currency: true } } },
+      select: {
+        id: true,
+        type: true,
+        status: true,
+        amount: true,
+        date: true,
+        vendor: true,
+        description: true,
+        category: { select: { nameEn: true, color: true } },
+        account: { select: { name: true, currency: true } },
+      },
       orderBy: { date: "desc" },
       take: 20,
     }),
@@ -32,6 +56,26 @@ export default async function DashboardPage() {
     prisma.userCurrency.findMany({
       where: { userId },
       orderBy: { sortOrder: "asc" },
+    }),
+    prisma.transaction.groupBy({
+      by: ["currency"],
+      where: {
+        userId,
+        type: "INCOME",
+        status: "VERIFIED",
+        date: { gte: monthStart, lt: monthEndExclusive },
+      },
+      _sum: { amount: true },
+    }),
+    prisma.transaction.groupBy({
+      by: ["currency"],
+      where: {
+        userId,
+        type: "EXPENSE",
+        status: "VERIFIED",
+        date: { gte: monthStart, lt: monthEndExclusive },
+      },
+      _sum: { amount: true },
     }),
   ]);
 
@@ -67,55 +111,31 @@ export default async function DashboardPage() {
   }));
 
   const distinctCurrencies = [...new Set(accounts.map((a) => a.currency))];
-  const now = new Date();
-  const monthStart = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1));
 
-  const monthIncomeTxs = recentTxs.filter(
-    (t) => t.type === "INCOME" && t.status === "VERIFIED" && new Date(t.date) >= monthStart,
+  // Raw sums per currency (fallback when FX unavailable). FX-normalized totals
+  // are streamed by <FxNormalizedTotal> below so the SSR critical path never
+  // blocks on the third-party rate API.
+  const monthIncome = monthIncomeAgg.reduce(
+    (s, row) => s.plus(row._sum.amount?.toString() ?? "0"),
+    new Decimal(0),
   );
-  const monthExpenseTxs = recentTxs.filter(
-    (t) => t.type === "EXPENSE" && t.status === "VERIFIED" && new Date(t.date) >= monthStart,
+  const monthExpenses = monthExpensesAgg.reduce(
+    (s, row) => s.plus(row._sum.amount?.toString() ?? "0"),
+    new Decimal(0),
   );
 
-  // Raw sums per currency (used as fallback when FX unavailable)
-  const monthIncome = monthIncomeTxs.reduce((s, t) => s.plus(t.amount), new Decimal(0));
-  const monthExpenses = monthExpenseTxs.reduce((s, t) => s.plus(t.amount), new Decimal(0));
-
-  let totalBalanceNzd: string | null = null;
-  let monthIncomeNzd: string | null = null;
-  let monthExpensesNzd: string | null = null;
-  let fxCheckedAt: string | null = null;
-  let fxProvider: string | null = null;
-
-  try {
-    const fx = await fetchNzdFxRates();
-    fxCheckedAt = fx.updatedAt;
-    fxProvider = fx.provider;
-
-    const converted = accounts.reduce((sum, a) => {
-      const nzdAmount = convertToNzd(Number(a.balance.toString()), a.currency, fx.rates);
-      return sum + nzdAmount;
-    }, 0);
-    totalBalanceNzd = roundMoney(converted).toFixed(2);
-
-    // Convert monthly totals to NZD so mixed-currency months display correctly
-    monthIncomeNzd = roundMoney(
-      monthIncomeTxs.reduce(
-        (sum, t) => sum + convertToNzd(Number(t.amount), t.account.currency, fx.rates),
-        0,
-      ),
-    ).toFixed(2);
-
-    monthExpensesNzd = roundMoney(
-      monthExpenseTxs.reduce(
-        (sum, t) => sum + convertToNzd(Number(t.amount), t.account.currency, fx.rates),
-        0,
-      ),
-    ).toFixed(2);
-  } catch {
-    // Keep dashboard available if FX provider is unavailable.
-    totalBalanceNzd = null;
-  }
+  const accountsForFx = accounts.map((a) => ({
+    balance: a.balance.toString(),
+    currency: a.currency,
+  }));
+  const monthIncomeByCurrency = monthIncomeAgg.map((row) => ({
+    currency: row.currency,
+    amount: row._sum.amount?.toString() ?? "0",
+  }));
+  const monthExpensesByCurrency = monthExpensesAgg.map((row) => ({
+    currency: row.currency,
+    amount: row._sum.amount?.toString() ?? "0",
+  }));
 
   return (
     <div className="min-h-screen bg-slate-950">
@@ -153,6 +173,9 @@ export default async function DashboardPage() {
           balance: a.balance.toString(),
           color: a.color,
           creditLimit: a.creditLimit?.toString() ?? null,
+          apr: a.apr?.toString() ?? null,
+          notes: a.notes,
+          isArchived: a.isArchived,
         }))}
         transactions={recentTxs.map((t) => ({
           id: t.id,
@@ -175,18 +198,33 @@ export default async function DashboardPage() {
         }))}
         summary={{
           totalBalance: totalBalance.toFixed(2),
-          totalBalanceNzd,
           monthIncome: monthIncome.toFixed(2),
           monthExpenses: monthExpenses.toFixed(2),
-          monthIncomeNzd,
-          monthExpensesNzd,
-          fxCheckedAt,
-          fxProvider,
           currencies: distinctCurrencies,
           rawBalancesByCurrency,
         }}
+        fxSlot={
+          <Suspense fallback={<FxNormalizedTotalFallback />}>
+            <FxNormalizedTotal
+              accounts={accountsForFx}
+              monthIncomeByCurrency={monthIncomeByCurrency}
+              monthExpensesByCurrency={monthExpensesByCurrency}
+              currencies={distinctCurrencies}
+            />
+          </Suspense>
+        }
         currencies={enabledCurrencies}
       />
+    </div>
+  );
+}
+
+function FxNormalizedTotalFallback() {
+  return (
+    <div className="mb-8 rounded-2xl border border-slate-800 bg-slate-900/70 p-4">
+      <p className="text-xs uppercase tracking-widest text-cyan-300/80">FX Normalized Total</p>
+      <p className="mt-1 h-8 w-48 animate-pulse rounded bg-slate-800" />
+      <p className="mt-2 text-xs text-slate-500">Fetching exchange rates…</p>
     </div>
   );
 }

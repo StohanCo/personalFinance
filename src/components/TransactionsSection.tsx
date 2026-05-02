@@ -182,11 +182,13 @@ export default function TransactionsSection({
   }, [filterSearch]);
 
   // ── Fetch transactions ────────────────────────────────────────────────────
+  // First page asks for ?withCount=1 to populate the header counter; subsequent
+  // load-more pages skip the count to avoid the full-table aggregate scan.
   const fetchTransactions = useCallback(async () => {
     setLoading(true);
     setFetchError(null);
     try {
-      const p = new URLSearchParams({ limit: "50" });
+      const p = new URLSearchParams({ limit: "50", withCount: "1" });
       if (filterType !== "ALL") p.set("type", filterType);
       if (filterStatus !== "ALL") p.set("status", filterStatus);
       if (filterAccountId) p.set("accountId", filterAccountId);
@@ -199,7 +201,7 @@ export default function TransactionsSection({
       const data = (await res.json()) as ApiResponse;
       setTransactions(data.transactions);
       setNextCursor(data.nextCursor);
-      setTotal(data.total);
+      if (data.total !== null && data.total !== undefined) setTotal(data.total);
     } catch (err) {
       setFetchError(err instanceof Error ? err.message : "Error loading transactions");
     } finally {
