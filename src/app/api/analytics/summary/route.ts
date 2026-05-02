@@ -1,9 +1,13 @@
 import { NextRequest, NextResponse } from "next/server";
+import { unstable_cache } from "next/cache";
 import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/db/client";
 import { Prisma } from "@prisma/client";
 import Decimal from "decimal.js";
 import { z } from "zod";
+import { analyticsTag, txTag } from "@/lib/cache/tags";
+
+const CACHE_TTL_SECONDS = 300; // 5 min; tags drive precise invalidation on tx mutations
 
 // ── Query param validation ────────────────────────────────────────────────────
 
@@ -101,7 +105,32 @@ export async function GET(req: NextRequest) {
   const dateFrom = new Date(`${dateFromStr}T00:00:00`);
   const dateTo = new Date(`${dateToStr}T00:00:00`);
 
-  // ── Base transaction filter (reused across several queries) ───────────────
+  const cached = unstable_cache(
+    () =>
+      computeSummary({ userId, dateFrom, dateTo, dateFromStr, dateToStr, accountId }),
+    ["analytics-summary", userId, dateFromStr, dateToStr, accountId ?? "all"],
+    {
+      revalidate: CACHE_TTL_SECONDS,
+      tags: [analyticsTag(userId), txTag(userId)],
+    },
+  );
+
+  return NextResponse.json(await cached());
+}
+
+// ── Pure compute: pulled out of the request handler so unstable_cache can
+// memoize it per (user, dateFrom, dateTo, accountId). Invalidated by either
+// `analytics:${userId}` or `tx:${userId}` tag.
+async function computeSummary(args: {
+  userId: string;
+  dateFrom: Date;
+  dateTo: Date;
+  dateFromStr: string;
+  dateToStr: string;
+  accountId?: string;
+}) {
+  const { userId, dateFrom, dateTo, dateFromStr, dateToStr, accountId } = args;
+
   const baseTxWhere: Prisma.TransactionWhereInput = {
     userId,
     status: "VERIFIED",
@@ -109,12 +138,10 @@ export async function GET(req: NextRequest) {
     ...(accountId ? { accountId } : {}),
   };
 
-  // ── Optional accountId fragment for the raw monthly query ─────────────────
   const accountFragment = accountId
     ? Prisma.sql`AND t."accountId" = ${accountId}`
     : Prisma.sql``;
 
-  // ── Fire all independent queries in parallel ──────────────────────────────
   const [
     categoryGroups,
     incomeAggregate,
@@ -315,8 +342,8 @@ export async function GET(req: NextRequest) {
     avgMonthlyIncome: avgMonthlyIncome.toFixed(2),
   };
 
-  // ── Return ────────────────────────────────────────────────────────────────
-  return NextResponse.json({
+  // ── Return cached payload ────────────────────────────────────────────────
+  return {
     dateFrom: dateFromStr,
     dateTo: dateToStr,
     spendByCategory,
@@ -324,5 +351,5 @@ export async function GET(req: NextRequest) {
     accountDistribution,
     topVendors,
     summary,
-  });
+  };
 }

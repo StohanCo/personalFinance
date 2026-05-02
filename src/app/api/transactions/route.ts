@@ -1,9 +1,28 @@
 import { NextRequest, NextResponse } from "next/server";
+import { revalidateTag } from "next/cache";
 import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/db/client";
 import { createTransaction } from "@/server/services/transactions";
 import { z } from "zod";
 import type { Prisma } from "@prisma/client";
+import {
+  accountsTag,
+  analyticsTag,
+  budgetsTag,
+  txTag,
+} from "@/lib/cache/tags";
+
+/**
+ * Invalidate every cache surface a transaction mutation can affect: the tx
+ * cache, derived analytics, budget progress, and the account row (balance
+ * changes). Called after every create/update/delete/clone.
+ */
+export function bumpTxCaches(userId: string) {
+  revalidateTag(txTag(userId));
+  revalidateTag(analyticsTag(userId));
+  revalidateTag(budgetsTag(userId));
+  revalidateTag(accountsTag(userId));
+}
 
 // ── Shared include / formatter (also used by [id]/route.ts) ──────────────────
 
@@ -189,5 +208,6 @@ export async function POST(req: NextRequest) {
     source: parsed.data.receiptId ? "SCAN" : "MANUAL",
   });
 
+  bumpTxCaches(session.user.id);
   return NextResponse.json({ transaction: tx }, { status: 201 });
 }

@@ -1,7 +1,9 @@
 import { NextRequest, NextResponse } from "next/server";
+import { revalidateTag } from "next/cache";
 import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/db/client";
 import { z } from "zod";
+import { budgetsTag } from "@/lib/cache/tags";
 
 // ── Zod schema ──────────────────────────────────────────────────────────────
 
@@ -130,6 +132,7 @@ export async function PATCH(
     include: { category: { select: categorySelect } },
   });
 
+  revalidateTag(budgetsTag(session.user.id));
   return NextResponse.json({ budget: formatBudget(updated) });
 }
 
@@ -158,5 +161,6 @@ export async function DELETE(
 
   await prisma.budget.delete({ where: { id } });
 
+  revalidateTag(budgetsTag(session.user.id));
   return new NextResponse(null, { status: 204 });
 }

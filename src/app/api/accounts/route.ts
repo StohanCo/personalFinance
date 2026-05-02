@@ -1,7 +1,9 @@
 import { NextRequest, NextResponse } from "next/server";
+import { revalidateTag } from "next/cache";
 import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/db/client";
 import { z } from "zod";
+import { accountsTag, analyticsTag } from "@/lib/cache/tags";
 
 const CreateAccountSchema = z.object({
   name: z.string().min(1).max(80),
@@ -36,5 +38,7 @@ export async function POST(req: NextRequest) {
     },
   });
 
+  revalidateTag(accountsTag(session.user.id));
+  revalidateTag(analyticsTag(session.user.id));
   return NextResponse.json({ account }, { status: 201 });
 }

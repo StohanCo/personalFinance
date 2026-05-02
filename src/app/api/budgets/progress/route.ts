@@ -1,7 +1,11 @@
 import { NextRequest, NextResponse } from "next/server";
+import { unstable_cache } from "next/cache";
 import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/db/client";
 import Decimal from "decimal.js";
+import { budgetsTag, txTag } from "@/lib/cache/tags";
+
+const CACHE_TTL_SECONDS = 300;
 
 // ── Period date-range helpers ────────────────────────────────────────────────
 
@@ -60,15 +64,36 @@ export async function GET(req: NextRequest) {
     );
   }
   const period = rawPeriod as PeriodKey;
+  const userId = session.user.id;
 
-  // Compute date range for the current period
+  // Compute date range for the current period (current wall-clock month/quarter/year)
   const now = new Date();
   const { start: periodStart, end: periodEnd } = getPeriodRange(period, now);
+  const periodKey = `${toDateString(periodStart)}_${toDateString(periodEnd)}`;
 
-  // Fetch all active budgets for this user matching the period
+  const cached = unstable_cache(
+    () => computeProgress({ userId, period, periodStart, periodEnd }),
+    ["budgets-progress", userId, period, periodKey],
+    {
+      revalidate: CACHE_TTL_SECONDS,
+      tags: [budgetsTag(userId), txTag(userId)],
+    },
+  );
+
+  return NextResponse.json(await cached());
+}
+
+async function computeProgress(args: {
+  userId: string;
+  period: PeriodKey;
+  periodStart: Date;
+  periodEnd: Date;
+}) {
+  const { userId, period, periodStart, periodEnd } = args;
+
   const budgets = await prisma.budget.findMany({
     where: {
-      userId: session.user.id,
+      userId,
       period,
       startDate: { lte: periodEnd },
       OR: [{ endDate: null }, { endDate: { gte: periodStart } }],
@@ -86,12 +111,12 @@ export async function GET(req: NextRequest) {
   });
 
   if (budgets.length === 0) {
-    return NextResponse.json({
+    return {
       period,
       periodStart: toDateString(periodStart),
       periodEnd: toDateString(periodEnd),
       items: [],
-    });
+    };
   }
 
   // Gather all relevant categoryIds for a single aggregation query
@@ -101,7 +126,7 @@ export async function GET(req: NextRequest) {
   const spendRows = await prisma.transaction.groupBy({
     by: ["categoryId"],
     where: {
-      userId: session.user.id,
+      userId,
       type: "EXPENSE",
       status: "VERIFIED",
       categoryId: { in: categoryIds },
@@ -155,10 +180,10 @@ export async function GET(req: NextRequest) {
     };
   });
 
-  return NextResponse.json({
+  return {
     period,
     periodStart: toDateString(periodStart),
     periodEnd: toDateString(periodEnd),
     items,
-  });
+  };
 }

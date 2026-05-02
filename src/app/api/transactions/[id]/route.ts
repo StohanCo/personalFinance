@@ -5,7 +5,7 @@ import {
   updateTransaction,
   deleteTransaction,
 } from "@/server/services/transactions";
-import { txInclude, formatTx } from "@/app/api/transactions/route";
+import { txInclude, formatTx, bumpTxCaches } from "@/app/api/transactions/route";
 import { z } from "zod";
 
 // ── Shared route-segment context type (Next.js 15 async params) ──────────────
@@ -124,6 +124,7 @@ export async function PATCH(
     return NextResponse.json({ error: "Transaction not found" }, { status: 404 });
   }
 
+  bumpTxCaches(userId);
   return NextResponse.json({ transaction: formatTx(full) });
 }
 
@@ -149,5 +150,6 @@ export async function DELETE(
     throw err;
   }
 
+  bumpTxCaches(session.user.id);
   return new NextResponse(null, { status: 204 });
 }

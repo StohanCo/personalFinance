@@ -1,7 +1,11 @@
 import { NextRequest, NextResponse } from "next/server";
+import { unstable_cache } from "next/cache";
 import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/db/client";
 import Decimal from "decimal.js";
+import { analyticsTag, txTag } from "@/lib/cache/tags";
+
+const CACHE_TTL_SECONDS = 300;
 
 // ── Date helpers ──────────────────────────────────────────────────────────────
 
@@ -77,6 +81,24 @@ export async function GET(req: NextRequest) {
       { status: 400 }
     );
   }
+
+  const dateFromKey = toDateString(dateFrom);
+  const dateToKey = toDateString(dateTo);
+
+  const cached = unstable_cache(
+    () => computeStats({ userId, dateFrom, dateTo }),
+    ["analytics-stats", userId, dateFromKey, dateToKey],
+    {
+      revalidate: CACHE_TTL_SECONDS,
+      tags: [analyticsTag(userId), txTag(userId)],
+    },
+  );
+
+  return NextResponse.json(await cached());
+}
+
+async function computeStats(args: { userId: string; dateFrom: Date; dateTo: Date }) {
+  const { userId, dateFrom, dateTo } = args;
 
   // ── 1. Aggregate monthly expense & income totals ───────────────────────────
   //
@@ -259,9 +281,9 @@ export async function GET(req: NextRequest) {
 
   const accountSnapshots = Array.from(accountSnapshotMap.values());
 
-  // ── 6. Compose response ───────────────────────────────────────────────────
+  // ── 6. Compose payload ───────────────────────────────────────────────────
 
-  return NextResponse.json({
+  return {
     volatility: {
       monthlyExpenseStdDev: monthlyExpenseStdDev.toFixed(2),
       coefficientOfVariation: parseFloat(coefficientOfVariation.toFixed(4)),
@@ -280,5 +302,5 @@ export async function GET(req: NextRequest) {
       label: concentrationLabel,
     },
     accountSnapshots,
-  });
+  };
 }
