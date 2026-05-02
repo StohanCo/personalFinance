@@ -286,6 +286,9 @@ export default function TransactionsSection({
   }
 
   // ── Verify / Reject ───────────────────────────────────────────────────────
+  // PATCH responses are wrapped as `{ transaction: TxFull }`; unwrap before
+  // putting into state — otherwise selectedTx becomes the wrapper and the
+  // next render explodes on `.type.charAt(0)` etc.
   async function updateStatus(status: "VERIFIED" | "REJECTED") {
     if (!selectedTx) return;
     setStatusLoading(true);
@@ -297,7 +300,7 @@ export default function TransactionsSection({
         body: JSON.stringify({ status }),
       });
       if (!res.ok) throw new Error("Status update failed");
-      const updated = (await res.json()) as TxFull;
+      const { transaction: updated } = (await res.json()) as { transaction: TxFull };
       setSelectedTx(updated);
       setTransactions((prev) => prev.map((t) => (t.id === updated.id ? updated : t)));
       router.refresh();
@@ -333,7 +336,7 @@ export default function TransactionsSection({
         body: JSON.stringify(body),
       });
       if (!res.ok) throw new Error("Save failed");
-      const updated = (await res.json()) as TxFull;
+      const { transaction: updated } = (await res.json()) as { transaction: TxFull };
       setSelectedTx(updated);
       setTransactions((prev) => prev.map((t) => (t.id === updated.id ? updated : t)));
       setEditMode(false);
