@@ -216,6 +216,12 @@ model Transaction {
   source     TxSource @default(MANUAL)
   externalId String?
 
+  // Cloning: when a transaction is duplicated via the "Copy" action we keep
+  // a pointer to the source for traceability. Cleared on source delete.
+  clonedFromId String?
+  clonedFrom   Transaction?  @relation("TxClones", fields: [clonedFromId], references: [id], onDelete: SetNull)
+  clones       Transaction[] @relation("TxClones")
+
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
@@ -224,6 +230,7 @@ model Transaction {
   @@index([userId, type, date])
   @@index([accountId, date])
   @@index([categoryId])
+  @@index([clonedFromId])
 }
 
 model Receipt {

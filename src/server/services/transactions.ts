@@ -147,6 +147,93 @@ export async function deleteTransaction(txId: string, userId: string) {
   });
 }
 
+// ---------- clone ----------
+
+export type CloneTxOverrides = {
+  date?: Date;
+  accountId?: string;
+  amount?: Decimal.Value;
+  vendor?: string | null;
+  description?: string | null;
+  notes?: string | null;
+};
+
+/**
+ * Duplicate an existing transaction. The clone:
+ *   - defaults to today's date and PENDING status (forces re-verification)
+ *   - never carries the source's receiptId (each receipt is 1:1 with a tx)
+ *   - keeps a pointer to the source via clonedFromId for traceability
+ *   - re-uses createTransaction so balance + audit log stay correct
+ *
+ * Throws "Transaction not found" if the source row is missing or owned by
+ * another user. Throws if the source is a TRANSFER (handled separately —
+ * the user should explicitly create a new transfer pair).
+ */
+export async function cloneTransaction(
+  sourceId: string,
+  userId: string,
+  overrides: CloneTxOverrides = {},
+) {
+  const source = await prisma.transaction.findFirst({
+    where: { id: sourceId, userId },
+  });
+  if (!source) throw new Error("Transaction not found");
+  if (source.type === "TRANSFER") {
+    throw new Error("Cannot clone a TRANSFER — recreate the transfer pair instead");
+  }
+
+  const clone = await createTransaction({
+    userId,
+    accountId: overrides.accountId ?? source.accountId,
+    categoryId: source.categoryId,
+    type: source.type,
+    amount: overrides.amount ?? source.amount,
+    date: overrides.date ?? new Date(),
+    vendor:
+      overrides.vendor !== undefined
+        ? overrides.vendor ?? undefined
+        : source.vendor ?? undefined,
+    description:
+      overrides.description !== undefined
+        ? overrides.description ?? undefined
+        : source.description ?? undefined,
+    notes:
+      overrides.notes !== undefined
+        ? overrides.notes ?? undefined
+        : source.notes ?? undefined,
+    gstApplicable: source.gstApplicable,
+    gstAmount: source.gstAmount,
+    gstInclusive: source.gstInclusive,
+    isDeductible: source.isDeductible,
+    deductiblePercent: source.deductiblePercent,
+    // Force re-review on the clone — the user should explicitly verify the
+    // new occurrence. Skips balance impact until they confirm.
+    status: "PENDING",
+    source: "MANUAL",
+  });
+
+  // Wire up the back-reference + dedicated audit entry so the operation is
+  // visible in the audit log (createTransaction already wrote a "created"
+  // row, this one annotates the cause).
+  await prisma.$transaction(async (tx) => {
+    await tx.transaction.update({
+      where: { id: clone.id },
+      data: { clonedFromId: source.id },
+    });
+    await tx.auditLog.create({
+      data: {
+        userId,
+        entityType: "transaction",
+        entityId: clone.id,
+        action: "cloned",
+        metadata: { sourceId: source.id },
+      },
+    });
+  });
+
+  return clone;
+}
+
 // ---------- update ----------
 
 export type UpdateTxInput = {

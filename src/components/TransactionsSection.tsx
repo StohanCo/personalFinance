@@ -156,6 +156,7 @@ export default function TransactionsSection({
   const [statusLoading, setStatusLoading] = useState(false);
   const [deleteLoading, setDeleteLoading] = useState(false);
   const [deleteConfirm, setDeleteConfirm] = useState(false);
+  const [cloneLoading, setCloneLoading] = useState(false);
 
   // ── Derived ───────────────────────────────────────────────────────────────
   const hasFilters =
@@ -341,6 +342,48 @@ export default function TransactionsSection({
       setSaveError(err instanceof Error ? err.message : "Failed to save changes");
     } finally {
       setSaveLoading(false);
+    }
+  }
+
+  // ── Duplicate ─────────────────────────────────────────────────────────────
+  // Clones the selected tx as PENDING with today's date. The user can then
+  // edit/verify/reject from the same drawer without needing to retype data.
+  async function duplicateTx() {
+    if (!selectedTx) return;
+    setCloneLoading(true);
+    setSaveError(null);
+    try {
+      const res = await fetch(`/api/transactions/${selectedTx.id}/clone`, {
+        method: "POST",
+      });
+      if (!res.ok) {
+        const data = (await res.json().catch(() => ({}))) as { error?: string };
+        throw new Error(data.error ?? "Duplicate failed");
+      }
+      const { transaction: created } = (await res.json()) as { transaction: TxFull };
+      // Insert the new tx at the top of the list, jump the drawer to it so the
+      // user can adjust the date/amount/etc immediately.
+      setTransactions((prev) => [created, ...prev]);
+      setTotal((prev) => prev + 1);
+      setSelectedTx(created);
+      setEditMode(true);
+      setEditForm({
+        vendor: created.vendor ?? "",
+        description: created.description ?? "",
+        notes: created.notes ?? "",
+        amount: created.amount,
+        date: created.date.slice(0, 10),
+        type: created.type,
+        categoryId: created.categoryId ?? "",
+        gstApplicable: created.gstApplicable,
+        isDeductible: created.isDeductible,
+        deductiblePercent: String(created.deductiblePercent),
+      });
+      router.refresh();
+    } catch (err) {
+      setSaveError(err instanceof Error ? err.message : "Duplicate failed");
+    } finally {
+      setCloneLoading(false);
     }
   }
 
@@ -1059,7 +1102,7 @@ export default function TransactionsSection({
                   </div>
                 )}
 
-                {/* Edit + Delete */}
+                {/* Edit + Duplicate + Delete */}
                 <div className="flex gap-2">
                   <button
                     onClick={() => beginEdit(selectedTx)}
@@ -1067,6 +1110,17 @@ export default function TransactionsSection({
                   >
                     Edit
                   </button>
+
+                  {selectedTx.type !== "TRANSFER" && (
+                    <button
+                      onClick={() => void duplicateTx()}
+                      disabled={cloneLoading}
+                      title="Clone as a new PENDING transaction dated today"
+                      className="flex-1 rounded-lg border border-cyan-700/50 py-2 text-xs font-medium text-cyan-300 transition hover:border-cyan-500 hover:bg-cyan-900/20 disabled:opacity-50"
+                    >
+                      {cloneLoading ? "Duplicating…" : "Duplicate"}
+                    </button>
+                  )}
 
                   {deleteConfirm ? (
                     <div className="flex flex-1 gap-1">
