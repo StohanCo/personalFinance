@@ -9,6 +9,7 @@ type Props = {
   provider: string | null;
   updatedAt: string | null;
   currencies: string[];
+  missingCurrencies: string[];
   rates: Record<string, number> | null;
 };
 
@@ -25,6 +26,7 @@ export default function FxNormalizedTotalClient({
   provider: initialProvider,
   updatedAt: initialUpdatedAt,
   currencies,
+  missingCurrencies,
   rates: _initialRates,
 }: Props) {
   const [totalNzd, setTotalNzd] = useState<string | null>(initialTotal);
@@ -75,6 +77,12 @@ export default function FxNormalizedTotalClient({
             <p className="mt-1 text-xs text-slate-500">
               Source: {provider ?? "public API"}
               {updatedAt ? ` · ${new Date(updatedAt).toLocaleString("en-NZ")}` : ""}
+            </p>
+          )}
+          {missingCurrencies.length > 0 && (
+            <p className="mt-2 rounded-md border border-amber-700/50 bg-amber-900/20 px-2 py-1 text-xs text-amber-300">
+              No FX rate for {missingCurrencies.join(", ")} — those balances are
+              excluded from the NZD total.
             </p>
           )}
         </div>

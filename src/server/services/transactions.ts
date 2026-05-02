@@ -176,6 +176,19 @@ export async function updateTransaction(txId: string, input: UpdateTxInput) {
     });
     if (!old) throw new Error("Transaction not found");
 
+    // ── 1a. Guard: TRANSFER linkage is immutable through this endpoint.
+    // Changing type from/to TRANSFER would silently drop the
+    // transferAccountId or fabricate one, leaving balances unrecoverable.
+    if (input.type !== undefined && input.type !== old.type) {
+      const becomesTransfer = input.type === "TRANSFER";
+      const wasTransfer = old.type === "TRANSFER";
+      if (becomesTransfer || wasTransfer) {
+        throw new Error(
+          "Cannot change transaction type to/from TRANSFER. Delete and recreate the transfer instead.",
+        );
+      }
+    }
+
     // ── 2. Resolve effective values for balance calculations ─────────────────
     const oldStatus = old.status;
     const newStatus: TxStatus = input.status ?? oldStatus;
@@ -338,8 +351,10 @@ async function incrementBalance(
   accountId: string,
   delta: Decimal,
 ) {
+  // Pass a string fixed at 2dp; Prisma's Decimal field accepts string and
+  // routes it through pg's NUMERIC without going through JS float.
   await tx.account.update({
     where: { id: accountId },
-    data: { balance: { increment: delta.toFixed(2) as unknown as number } },
+    data: { balance: { increment: delta.toFixed(2) } },
   });
 }

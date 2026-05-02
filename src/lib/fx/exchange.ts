@@ -37,14 +37,23 @@ export async function fetchNzdFxRates(): Promise<FxSnapshot> {
   };
 }
 
-export function convertToNzd(amount: number, currency: string, rates: Record<string, number>): number {
+/**
+ * Convert an amount in `currency` to NZD.
+ *
+ * Returns null when no usable rate exists for `currency` so callers can
+ * surface the gap in the UI instead of silently summing the un-converted
+ * amount into an NZD total (which would mix currencies).
+ */
+export function convertToNzd(
+  amount: number,
+  currency: string,
+  rates: Record<string, number>,
+): number | null {
   if (!Number.isFinite(amount)) return 0;
   if (currency === "NZD") return amount;
 
   const rateFromNzd = rates[currency];
-  if (!rateFromNzd || rateFromNzd <= 0) {
-    return amount;
-  }
+  if (!rateFromNzd || rateFromNzd <= 0) return null;
 
   // API provides 1 NZD -> X currency, so invert to convert currency -> NZD.
   return amount / rateFromNzd;

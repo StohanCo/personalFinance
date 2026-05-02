@@ -694,33 +694,41 @@ export default function TransactionsSection({
                     </p>
                   )}
 
-                  {/* Type selector */}
+                  {/* Type selector — TRANSFER is immutable once a tx is created
+                      because it carries an account-pair invariant. */}
                   <div>
                     <label className="mb-1.5 block text-xs font-medium text-slate-400">
                       Type
                     </label>
-                    <div className="grid grid-cols-3 gap-1.5">
-                      {(["INCOME", "EXPENSE", "TRANSFER"] as const).map((t) => (
-                        <button
-                          key={t}
-                          type="button"
-                          onClick={() =>
-                            setEditForm((p) => ({ ...p, type: t, categoryId: "" }))
-                          }
-                          className={`rounded-lg py-1.5 text-xs font-medium transition ${
-                            editForm.type === t
-                              ? t === "INCOME"
-                                ? "bg-emerald-600 text-white"
-                                : t === "EXPENSE"
-                                  ? "bg-red-700 text-white"
-                                  : "bg-blue-700 text-white"
-                              : "border border-slate-700 text-slate-400 hover:border-slate-500 hover:text-white"
-                          }`}
-                        >
-                          {t.charAt(0) + t.slice(1).toLowerCase()}
-                        </button>
-                      ))}
-                    </div>
+                    {editForm.type === "TRANSFER" ? (
+                      <div className="rounded-lg border border-slate-700 bg-slate-800/40 px-3 py-2 text-xs text-slate-300">
+                        Transfer
+                        <span className="ml-2 text-slate-600">
+                          (locked — delete & recreate to change)
+                        </span>
+                      </div>
+                    ) : (
+                      <div className="grid grid-cols-2 gap-1.5">
+                        {(["INCOME", "EXPENSE"] as const).map((t) => (
+                          <button
+                            key={t}
+                            type="button"
+                            onClick={() =>
+                              setEditForm((p) => ({ ...p, type: t, categoryId: "" }))
+                            }
+                            className={`rounded-lg py-1.5 text-xs font-medium transition ${
+                              editForm.type === t
+                                ? t === "INCOME"
+                                  ? "bg-emerald-600 text-white"
+                                  : "bg-red-700 text-white"
+                                : "border border-slate-700 text-slate-400 hover:border-slate-500 hover:text-white"
+                            }`}
+                          >
+                            {t.charAt(0) + t.slice(1).toLowerCase()}
+                          </button>
+                        ))}
+                      </div>
+                    )}
                   </div>
 
                   <div className="grid grid-cols-2 gap-3">

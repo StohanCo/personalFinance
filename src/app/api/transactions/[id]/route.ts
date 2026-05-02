@@ -107,8 +107,13 @@ export async function PATCH(
       status: data.status,
     });
   } catch (err) {
-    if (err instanceof Error && err.message === "Transaction not found") {
-      return NextResponse.json({ error: "Transaction not found" }, { status: 404 });
+    if (err instanceof Error) {
+      if (err.message === "Transaction not found") {
+        return NextResponse.json({ error: "Transaction not found" }, { status: 404 });
+      }
+      if (err.message.startsWith("Cannot change transaction type")) {
+        return NextResponse.json({ error: err.message }, { status: 400 });
+      }
     }
     throw err; // let Next.js convert to 500
   }
